@@ -172,3 +172,29 @@ Phase 1 should be validated on physical hardware before Phase 5 (barge-in) is tr
 - **Unknown output route is treated as speakers.** Assuming an echo path that is not there
   costs a little barge-in latency; assuming one that is there costs false interruptions,
   which is the failure that makes people switch voice off.
+
+## Phase 1 integration — duplex + AEC on real device timing
+
+`cargo run --release -p buzztalk-labs --bin live-aec --features aec-backends`
+
+The offline bench proves the algorithm cancels. This proves the plumbing: that render
+reference and capture frames arrive paired and in order, and that the canceller keeps up at
+the 10 ms cadence. Those are different failures — a canceller fed correct audio in the wrong
+order produces exactly the same symptom as one that does not work.
+
+| | release | debug |
+|---|---|---|
+| worst single-frame AEC time | **481–616 µs** | **7182 µs** |
+| share of the 10 ms real-time budget | ~5–6% | **~72%** |
+| capture / render-ref drops | 0 | 0 |
+| playback underruns | 0 | 0 |
+| frame pairing backlog | stable at 0/1 | stable at 0/1 |
+
+**Voice must run in release builds.** A debug build consumes nearly three quarters of the
+real-time frame budget before any speech recognition or synthesis is added — it would appear
+to work in isolation and fall apart the moment STT and TTS share the machine. Release leaves
+roughly 20× headroom, which is what the remaining pipeline gets to spend.
+
+ERLE is reported as `n/a` here rather than a number: this machine's virtual input device
+captures digital silence, so there is no echo to remove. That is the expected result on this
+hardware and it is why the acoustic claims still need a physical Mac.

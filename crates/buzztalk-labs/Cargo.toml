@@ -24,3 +24,8 @@ path = "src/erle_bench.rs"
 [[bin]]
 name = "duplex-soak"
 path = "src/duplex_soak.rs"
+
+[[bin]]
+name = "live-aec"
+path = "src/live_aec.rs"
+required-features = ["aec-backends"]
