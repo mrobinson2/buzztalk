@@ -5,7 +5,23 @@
 Talk to your agents. Hear them respond. Interrupt them naturally.
 Speech runs locally on your machine.
 
-> **Status: pre-alpha.** Phase 0 — validating the audio foundation. Nothing to install yet.
+> **Status: pre-alpha.** The audio foundation is built and measured; there is nothing to
+> install yet, and it does not talk to Buzz yet.
+
+## Where this actually is
+
+| | |
+|---|---|
+| Echo cancellation | `sonora` chosen over `aec3` and `webrtc-audio-processing`. **36.6 dB** synthetic ERLE against a **0.0 dB** passthrough control. |
+| Duplex engine | 60 s soak: zero dropped frames, zero underruns, **no clock drift** between capture and the render reference. |
+| Real-time budget | **481 µs** per frame in release against a 10 ms budget — ~20× headroom. (A debug build takes 7182 µs. Run voice in release.) |
+| Render reference | Bit-exact with device output, silence included, enforced by test. |
+| Tests | 22 passing, plus 3 hardware tests behind `--ignored`. |
+
+**Not yet proven:** every echo-cancellation number above is synthetic. The development
+machine is a remotely-accessed Mac mini whose default audio device is a virtual driver, so
+it has no acoustic loop and cannot validate the thing that matters most — a real microphone
+hearing a real speaker in a real room. See [`docs/PHASE-0.md`](docs/PHASE-0.md).
 
 ---
 
