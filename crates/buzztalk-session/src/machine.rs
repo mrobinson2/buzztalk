@@ -7,7 +7,7 @@ use buzztalk_core::DetectorEvent;
 use crate::preroll::PreRollBuffer;
 use crate::types::{
     Frame, Input, Output, SessionState, TurnId, AGENT_RESPONSE_TIMEOUT, BARGE_IN_RETRACTION_WINDOW,
-    IDLE_TIMEOUT, MAX_UTTERANCE,
+    FINALIZE_TIMEOUT, IDLE_TIMEOUT, MAX_UTTERANCE,
 };
 
 /// The conversation state machine.
@@ -23,7 +23,16 @@ use crate::types::{
 #[derive(Debug, Clone)]
 pub struct SessionMachine {
     state: SessionState,
+    /// The turn presently accepted by the machine: the one a matching
+    /// [`Input`] must name to be acted on.
     current_turn: Option<TurnId>,
+    /// While [`SessionState::Interrupting`]: the agent turn that was
+    /// speaking when the barge-in was confirmed, on hold pending proof it
+    /// was genuine. `current_turn` holds the *candidate* turn during this
+    /// window (see [`Self::on_barge_in_confirmed`]) so that a confirming
+    /// transcript -- which necessarily arrives tagged with the candidate,
+    /// not the agent turn -- passes the identity check unmodified.
+    pending_cancel_turn: Option<TurnId>,
     turn_counter: u64,
     current_utterance: Option<String>,
     last_failed_utterance: Option<String>,
@@ -31,6 +40,7 @@ pub struct SessionMachine {
     agent_turn_complete: bool,
     listening_elapsed: Duration,
     speaking_elapsed: Duration,
+    finalizing_elapsed: Duration,
     awaiting_agent_elapsed: Duration,
     interrupting_elapsed: Duration,
     preroll: PreRollBuffer,
@@ -42,6 +52,7 @@ impl SessionMachine {
         Self {
             state: SessionState::Idle,
             current_turn: None,
+            pending_cancel_turn: None,
             turn_counter: 0,
             current_utterance: None,
             last_failed_utterance: None,
@@ -49,6 +60,7 @@ impl SessionMachine {
             agent_turn_complete: false,
             listening_elapsed: Duration::ZERO,
             speaking_elapsed: Duration::ZERO,
+            finalizing_elapsed: Duration::ZERO,
             awaiting_agent_elapsed: Duration::ZERO,
             interrupting_elapsed: Duration::ZERO,
             preroll: PreRollBuffer::new(),
@@ -61,19 +73,28 @@ impl SessionMachine {
     }
 
     /// The turn presently in flight, if any.
+    ///
+    /// Call this right after a call to [`Self::handle`] that starts a new
+    /// turn (e.g. [`Input::EndpointEvent`] carrying `SpeechStart`, or
+    /// [`Input::PushToTalkPressed`]) to learn the [`TurnId`] to tag that
+    /// turn's STT results with -- those transitions don't hand the id out
+    /// through an `Output` because nothing asynchronous has started yet.
     pub fn current_turn(&self) -> Option<TurnId> {
         self.current_turn
     }
 
     /// Whether `id` is still the active turn.
     ///
-    /// Callers holding a [`TurnId`] captured earlier (e.g. alongside an
-    /// outbound agent request) should check this before acting on a result
-    /// that arrives asynchronously. The machine itself applies the same
-    /// rule internally: [`Input::FinalTranscript`] and
-    /// [`Input::AgentTextArrived`] are only accepted in the states that are
-    /// actually waiting on them, so a result for an abandoned turn is
-    /// dropped rather than rendered even if the caller forwards it anyway.
+    /// [`Self::handle`] already enforces this for every turn-carrying
+    /// [`Input`] -- rejecting a stale one before any state logic runs -- so
+    /// correctness never depends on a caller checking this first. It's
+    /// exposed as a cheap pre-filter: skip constructing/sending an `Input`
+    /// at all for a result you already know is stale. Do **not** use it to
+    /// decide whether to *abort* in-flight work (e.g. stop generating an
+    /// agent reply) -- during [`SessionState::Interrupting`] the turn being
+    /// held for possible resumption is briefly not current, precisely
+    /// because it might resume. [`Output::CancelSynthesis`] is the only
+    /// authoritative "stop for good" signal.
     pub fn is_current(&self, id: TurnId) -> bool {
         self.current_turn == Some(id)
     }
@@ -121,13 +142,13 @@ impl SessionMachine {
             Input::SessionEnd | Input::StopRequested => self.on_session_end(),
             Input::EndpointEvent(ev) => self.on_endpoint_event(ev),
             Input::BargeInConfirmed => self.on_barge_in_confirmed(),
-            Input::PartialTranscript(text) => self.on_partial_transcript(text),
-            Input::FinalTranscript(text) => self.on_final_transcript(text),
-            Input::SubmitSucceeded => self.on_submit_succeeded(),
-            Input::SubmitFailed(reason) => self.on_submit_failed(reason),
-            Input::AgentTextArrived(text) => self.on_agent_text_arrived(text),
-            Input::AgentTurnComplete => self.on_agent_turn_complete(),
-            Input::PlaybackDrained => self.on_playback_drained(),
+            Input::PartialTranscript { turn, text } => self.on_partial_transcript(turn, text),
+            Input::FinalTranscript { turn, text } => self.on_final_transcript(turn, text),
+            Input::SubmitSucceeded { turn } => self.on_submit_succeeded(turn),
+            Input::SubmitFailed { turn, error } => self.on_submit_failed(turn, error),
+            Input::AgentTextArrived { turn, text } => self.on_agent_text_arrived(turn, text),
+            Input::AgentTurnComplete { turn } => self.on_agent_turn_complete(turn),
+            Input::PlaybackDrained { turn } => self.on_playback_drained(turn),
             Input::PushToTalkPressed => self.on_ptt_pressed(),
             Input::PushToTalkReleased => self.on_ptt_released(),
             Input::Tick(dt) => self.on_tick(dt),
@@ -163,6 +184,7 @@ impl SessionMachine {
     fn reset_all_timers(&mut self) {
         self.listening_elapsed = Duration::ZERO;
         self.speaking_elapsed = Duration::ZERO;
+        self.finalizing_elapsed = Duration::ZERO;
         self.awaiting_agent_elapsed = Duration::ZERO;
         self.interrupting_elapsed = Duration::ZERO;
     }
@@ -176,6 +198,7 @@ impl SessionMachine {
         self.reset_all_timers();
         self.preroll.clear();
         self.current_turn = None;
+        self.pending_cancel_turn = None;
         self.current_utterance = None;
         self.last_failed_utterance = None;
         self.last_submit_error = None;
@@ -195,13 +218,22 @@ impl SessionMachine {
         ) {
             out.push(Output::CancelPlayback);
             out.push(Output::FlushOutputBuffer);
-            if let Some(turn) = self.current_turn {
+            // While Interrupting, `current_turn` holds the barge-in
+            // candidate, not the agent turn that's actually mid-synthesis
+            // -- that one is parked in `pending_cancel_turn`.
+            let turn_to_cancel = if self.state == SessionState::Interrupting {
+                self.pending_cancel_turn
+            } else {
+                self.current_turn
+            };
+            if let Some(turn) = turn_to_cancel {
                 out.push(Output::CancelSynthesis(turn));
             }
         }
         out.push(Output::StopCapture);
         self.state = SessionState::Idle;
         self.current_turn = None;
+        self.pending_cancel_turn = None;
         self.agent_turn_complete = false;
         self.preroll.clear();
         self.reset_all_timers();
@@ -217,6 +249,7 @@ impl SessionMachine {
             }
             (SessionState::UserSpeaking, DetectorEvent::SpeechEnd) => {
                 self.state = SessionState::Finalizing;
+                self.finalizing_elapsed = Duration::ZERO;
                 vec![]
             }
             // SpeechContinue, an Idle event, or any combination outside the
@@ -234,72 +267,94 @@ impl SessionMachine {
         if self.state != SessionState::AgentSpeaking {
             return vec![];
         }
+        // Allocate the barge-in candidate's identity *now*, not when it's
+        // later proven genuine: the caller needs it immediately to tag the
+        // STT stream it starts over the replayed pre-roll audio. The agent
+        // turn being interrupted is parked, not cancelled yet -- it may
+        // still turn out to be a false alarm.
+        self.pending_cancel_turn = self.current_turn;
+        let candidate = self.begin_user_turn();
         self.interrupting_elapsed = Duration::ZERO;
         self.state = SessionState::Interrupting;
         vec![
             Output::CancelPlayback,
             Output::FlushOutputBuffer,
-            Output::ReplayPreRoll,
+            Output::ReplayPreRoll(candidate),
         ]
     }
 
-    fn on_partial_transcript(&mut self, text: String) -> Vec<Output> {
+    fn on_partial_transcript(&mut self, turn: TurnId, text: String) -> Vec<Output> {
+        // Identity first, unconditionally, before any state logic: a
+        // result for a turn that isn't current is dropped outright.
+        if !self.is_current(turn) {
+            return vec![];
+        }
         match self.state {
             SessionState::UserSpeaking => vec![Output::ShowPartial(text)],
             SessionState::Interrupting => {
-                self.confirm_genuine_barge_in(move |_| vec![Output::ShowPartial(text)])
+                self.confirm_genuine_barge_in(vec![Output::ShowPartial(text)])
             }
             // Not expecting a partial: Listening (no utterance yet),
             // Finalizing (already past partials, waiting on the final),
             // Submitting/AwaitingAgent/AgentSpeaking/Idle (no user turn
-            // active). A partial here belongs to an utterance this machine
-            // has already moved on from -- drop it.
+            // active). Belt-and-braces state check behind the identity
+            // check above.
             _ => vec![],
         }
     }
 
-    fn on_final_transcript(&mut self, text: String) -> Vec<Output> {
+    fn on_final_transcript(&mut self, turn: TurnId, text: String) -> Vec<Output> {
+        if !self.is_current(turn) {
+            return vec![];
+        }
         match self.state {
             SessionState::Finalizing => {
                 self.current_utterance = Some(text.clone());
                 self.state = SessionState::Submitting;
-                vec![Output::SubmitUtterance(text)]
+                vec![Output::SubmitUtterance { turn, text }]
             }
             // A very fast interruption: the confirming transcript is
             // already the complete utterance.
-            SessionState::Interrupting => self.confirm_genuine_barge_in(move |m| {
-                m.current_utterance = Some(text.clone());
-                m.state = SessionState::Submitting;
-                vec![Output::SubmitUtterance(text)]
-            }),
-            // Only Finalizing is actually waiting on a final transcript.
-            // Anything else means this text belongs to a turn that is no
-            // longer current -- drop it silently, per the crate's central
-            // correctness rule: never render a late result for an
-            // abandoned turn.
+            SessionState::Interrupting => {
+                let mut out = self.confirm_genuine_barge_in(vec![]);
+                self.current_utterance = Some(text.clone());
+                self.state = SessionState::Submitting;
+                out.push(Output::SubmitUtterance { turn, text });
+                out
+            }
+            // Only Finalizing (or a confirming Interrupting) is actually
+            // waiting on a final transcript. Anything else means this text
+            // belongs to a turn that is, despite matching identity here in
+            // a way that shouldn't be reachable, not in a state expecting
+            // it -- drop it. (Kept as defense in depth; the identity check
+            // above should already have caught every real-world case this
+            // would guard against.)
             _ => vec![],
         }
     }
 
     /// Shared confirmation path for a genuine (non-spurious) barge-in: the
-    /// old turn's synthesis is cancelled for real, a fresh turn begins, and
-    /// then `then` supplies whatever outputs the specific confirming input
-    /// (partial or final transcript) implies.
-    fn confirm_genuine_barge_in(
-        &mut self,
-        then: impl FnOnce(&mut Self) -> Vec<Output>,
-    ) -> Vec<Output> {
+    /// parked agent turn is cancelled for real, and the machine moves into
+    /// `UserSpeaking` for the (already-current) candidate turn.
+    ///
+    /// `extra` supplies whatever outputs the specific confirming input
+    /// (partial or final transcript) implies; they're appended after the
+    /// cancellation.
+    fn confirm_genuine_barge_in(&mut self, extra: Vec<Output>) -> Vec<Output> {
         let mut out = Vec::new();
-        if let Some(old_turn) = self.current_turn {
+        if let Some(old_turn) = self.pending_cancel_turn.take() {
             out.push(Output::CancelSynthesis(old_turn));
         }
-        self.begin_user_turn();
+        self.speaking_elapsed = Duration::ZERO;
         self.state = SessionState::UserSpeaking;
-        out.extend(then(self));
+        out.extend(extra);
         out
     }
 
-    fn on_submit_succeeded(&mut self) -> Vec<Output> {
+    fn on_submit_succeeded(&mut self, turn: TurnId) -> Vec<Output> {
+        if !self.is_current(turn) {
+            return vec![];
+        }
         if self.state != SessionState::Submitting {
             return vec![];
         }
@@ -309,26 +364,32 @@ impl SessionMachine {
         vec![]
     }
 
-    fn on_submit_failed(&mut self, reason: String) -> Vec<Output> {
+    fn on_submit_failed(&mut self, turn: TurnId, error: String) -> Vec<Output> {
+        if !self.is_current(turn) {
+            return vec![];
+        }
         if self.state != SessionState::Submitting {
             return vec![];
         }
         // Keep the words: don't silently drop what the user said just
         // because the network call failed.
         self.last_failed_utterance = self.current_utterance.take();
-        self.last_submit_error = Some(reason);
+        self.last_submit_error = Some(error);
         self.current_turn = None;
         self.state = SessionState::Listening;
         self.listening_elapsed = Duration::ZERO;
         vec![]
     }
 
-    fn on_agent_text_arrived(&mut self, _text: String) -> Vec<Output> {
+    fn on_agent_text_arrived(&mut self, turn: TurnId, _text: String) -> Vec<Output> {
         // The text itself is not stored or replayed through an Output --
         // the caller already has it (it's the one calling `handle` with
         // it) and drives its own TTS/UI directly from the same event. This
         // machine only tracks the control-flow consequence: whether the
         // agent has started speaking for this turn.
+        if !self.is_current(turn) {
+            return vec![];
+        }
         match self.state {
             SessionState::AwaitingAgent => {
                 self.awaiting_agent_elapsed = Duration::ZERO;
@@ -338,13 +399,16 @@ impl SessionMachine {
             }
             SessionState::AgentSpeaking => vec![],
             // Not expecting agent text: this chunk belongs to a turn this
-            // machine has already abandoned (e.g. a confirmed barge-in
-            // moved it back to UserSpeaking). Drop it.
+            // machine has already abandoned. Belt-and-braces behind the
+            // identity check above.
             _ => vec![],
         }
     }
 
-    fn on_agent_turn_complete(&mut self) -> Vec<Output> {
+    fn on_agent_turn_complete(&mut self, turn: TurnId) -> Vec<Output> {
+        if !self.is_current(turn) {
+            return vec![];
+        }
         match self.state {
             // The agent had nothing to say at all this turn -- nothing to
             // play, so the turn is already over.
@@ -360,7 +424,10 @@ impl SessionMachine {
         }
     }
 
-    fn on_playback_drained(&mut self) -> Vec<Output> {
+    fn on_playback_drained(&mut self, turn: TurnId) -> Vec<Output> {
+        if !self.is_current(turn) {
+            return vec![];
+        }
         if self.state != SessionState::AgentSpeaking {
             return vec![];
         }
@@ -377,12 +444,27 @@ impl SessionMachine {
         match self.state {
             // No session, or already the user's turn: nothing to override.
             SessionState::Idle | SessionState::UserSpeaking => vec![],
-            SessionState::AgentSpeaking | SessionState::Interrupting => {
+            SessionState::AgentSpeaking => {
                 let mut out = vec![Output::CancelPlayback, Output::FlushOutputBuffer];
                 if let Some(turn) = self.current_turn {
                     out.push(Output::CancelSynthesis(turn));
                 }
                 self.begin_user_turn();
+                self.state = SessionState::UserSpeaking;
+                out
+            }
+            SessionState::Interrupting => {
+                // Playback was already cancelled/flushed on the way into
+                // Interrupting; only the parked agent turn still needs
+                // cancelling. The candidate turn (already `current_turn`)
+                // becomes the user's turn for real -- PTT is itself proof
+                // this is genuine, no transcript needed.
+                let mut out = Vec::new();
+                if let Some(old_turn) = self.pending_cancel_turn.take() {
+                    out.push(Output::CancelSynthesis(old_turn));
+                }
+                self.speaking_elapsed = Duration::ZERO;
+                self.current_utterance = None;
                 self.state = SessionState::UserSpeaking;
                 out
             }
@@ -406,6 +488,7 @@ impl SessionMachine {
             return vec![];
         }
         self.state = SessionState::Finalizing;
+        self.finalizing_elapsed = Duration::ZERO;
         vec![]
     }
 
@@ -423,6 +506,18 @@ impl SessionMachine {
                     // Don't trust the detector to ever endpoint; force it.
                     self.state = SessionState::Finalizing;
                     self.speaking_elapsed = Duration::ZERO;
+                    self.finalizing_elapsed = Duration::ZERO;
+                }
+            }
+            SessionState::Finalizing => {
+                self.finalizing_elapsed += dt;
+                if self.finalizing_elapsed >= FINALIZE_TIMEOUT {
+                    // The STT stream never finalized -- don't hang here
+                    // forever. Drop the turn and give the mic back.
+                    self.finalizing_elapsed = Duration::ZERO;
+                    self.current_turn = None;
+                    self.state = SessionState::Listening;
+                    self.listening_elapsed = Duration::ZERO;
                 }
             }
             SessionState::AwaitingAgent => {
@@ -438,19 +533,21 @@ impl SessionMachine {
                 self.interrupting_elapsed += dt;
                 if self.interrupting_elapsed >= BARGE_IN_RETRACTION_WINDOW {
                     self.interrupting_elapsed = Duration::ZERO;
+                    // Restore the parked agent turn as current -- it never
+                    // stopped being the one and only active turn, it was
+                    // just shadowed by the (now-discarded) candidate.
+                    let resumed = self.pending_cancel_turn.take();
+                    self.current_turn = resumed;
                     self.state = SessionState::AgentSpeaking;
-                    return vec![Output::ResumeSpeaking];
+                    if let Some(turn) = resumed {
+                        return vec![Output::ResumeSpeaking(turn)];
+                    }
                 }
             }
             // No independent timer of their own: Idle and AgentSpeaking are
-            // unbounded by design; Finalizing and Submitting are bounded by
-            // whatever the caller's STT/network stack does, not by this
-            // machine (see the crate-level docs for why that's a
-            // deliberate gap rather than an invented number).
-            SessionState::Idle
-            | SessionState::Finalizing
-            | SessionState::Submitting
-            | SessionState::AgentSpeaking => {}
+            // unbounded by design; Submitting is bounded by whatever the
+            // caller's network stack does, not by this machine.
+            SessionState::Idle | SessionState::Submitting | SessionState::AgentSpeaking => {}
         }
         vec![]
     }

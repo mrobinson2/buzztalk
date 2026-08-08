@@ -59,6 +59,31 @@ fn ptt_pressed_while_already_speaking_is_a_no_op() {
 }
 
 #[test]
+fn ptt_pressed_while_interrupting_confirms_it_and_cancels_the_parked_agent_turn() {
+    let (mut m, old_turn) = to_agent_speaking("what's next", "Let's see, next up is");
+
+    let _ = m.handle(Input::BargeInConfirmed);
+    let candidate = m.current_turn().expect("candidate turn while Interrupting");
+    assert_eq!(m.state(), SessionState::Interrupting);
+
+    // Playback was already cancelled/flushed on the way into Interrupting;
+    // PTT only needs to finish cancelling the parked agent turn for real
+    // and confirm the candidate as a genuine user turn -- no transcript
+    // needed, the button press is itself the proof.
+    let out = m.handle(Input::PushToTalkPressed);
+    assert_eq!(
+        out,
+        vec![
+            Output::CancelSynthesis(old_turn),
+            Output::EmitState(SessionState::UserSpeaking),
+        ]
+    );
+    assert_eq!(m.state(), SessionState::UserSpeaking);
+    assert_eq!(m.current_turn(), Some(candidate));
+    assert!(!m.is_current(old_turn));
+}
+
+#[test]
 fn ptt_released_without_a_prior_press_is_ignored() {
     let mut m = started();
     let out = m.handle(Input::PushToTalkReleased);

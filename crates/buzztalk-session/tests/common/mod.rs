@@ -31,8 +31,11 @@ pub fn to_finalizing() -> (SessionMachine, TurnId) {
 /// finalized (and successfully submitted) utterance.
 pub fn to_awaiting_agent(text: &str) -> (SessionMachine, TurnId) {
     let (mut m, turn) = to_finalizing();
-    let _ = m.handle(Input::FinalTranscript(text.to_string()));
-    let _ = m.handle(Input::SubmitSucceeded);
+    let _ = m.handle(Input::FinalTranscript {
+        turn,
+        text: text.to_string(),
+    });
+    let _ = m.handle(Input::SubmitSucceeded { turn });
     (m, turn)
 }
 
@@ -40,6 +43,9 @@ pub fn to_awaiting_agent(text: &str) -> (SessionMachine, TurnId) {
 /// `text` and received `agent_text` as the agent's first reply chunk.
 pub fn to_agent_speaking(text: &str, agent_text: &str) -> (SessionMachine, TurnId) {
     let (mut m, turn) = to_awaiting_agent(text);
-    let _ = m.handle(Input::AgentTextArrived(agent_text.to_string()));
+    let _ = m.handle(Input::AgentTextArrived {
+        turn,
+        text: agent_text.to_string(),
+    });
     (m, turn)
 }

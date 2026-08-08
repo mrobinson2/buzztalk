@@ -40,6 +40,17 @@ pub const MAX_UTTERANCE: Duration = Duration::from_secs(30);
 /// creak, residual echo the AEC missed).
 pub const BARGE_IN_RETRACTION_WINDOW: Duration = Duration::from_millis(700);
 
+/// How long [`SessionState::Finalizing`] waits for the STT stream to
+/// deliver a final transcript before giving up on this turn and falling
+/// back to [`SessionState::Listening`].
+///
+/// Measured worst-case STT re-decode latency tops out around 700 ms; 5 s is
+/// roughly a 7x margin over that, generous enough to absorb a slow backend
+/// or a retry without the machine ever noticing, while still being far
+/// short of [`IDLE_TIMEOUT`] -- a stuck finalize doesn't leave the user
+/// staring at a frozen mic for anywhere near that long.
+pub const FINALIZE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// How much audio history [`crate::PreRollBuffer`] keeps.
 ///
 /// Barge-in confirmation costs real time (the detector needs a run of
@@ -58,10 +69,18 @@ pub const PREROLL_FRAMES: usize =
 /// Identifies one conversational turn: one user utterance through to the
 /// agent's spoken reply draining (or the turn being abandoned early).
 ///
-/// Monotonically increasing and never reused. Compare against
-/// [`crate::SessionMachine::is_current`] before acting on any result that
-/// arrived asynchronously (an STT finalize, an agent response) -- a result
-/// for a turn that is no longer current must be dropped, not rendered.
+/// Monotonically increasing and never reused. Every [`Input`] that reports
+/// the result of something asynchronous (an STT partial or final, an agent
+/// text chunk, a submit result, a drained buffer) carries the `TurnId` it
+/// belongs to, and [`crate::SessionMachine::handle`] rejects it outright if
+/// that turn is no longer current -- identity is checked before any state
+/// logic runs. A caller learns the active `TurnId` from
+/// [`crate::SessionMachine::current_turn`] right after a call that starts a
+/// turn (e.g. [`Input::EndpointEvent`] carrying `SpeechStart`,
+/// [`Input::PushToTalkPressed`]), or directly from an [`Output`] that hands
+/// one out ([`Output::SubmitUtterance`], [`Output::ReplayPreRoll`],
+/// [`Output::CancelSynthesis`], [`Output::ResumeSpeaking`]) -- and tags its
+/// own async work with it so a result can be handed back unambiguously.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TurnId(pub(crate) u64);
 
@@ -105,6 +124,13 @@ pub enum SessionState {
 ///
 /// The machine never polls anything -- every fact it knows about the world
 /// arrives as one of these, including the passage of time ([`Input::Tick`]).
+///
+/// Every variant that reports the result of asynchronous work carries the
+/// [`TurnId`] it belongs to. [`crate::SessionMachine::handle`] rejects any
+/// such input whose turn is not [current](crate::SessionMachine::is_current)
+/// before it even looks at the current [`SessionState`] -- a late result
+/// for an abandoned turn (a stale STT finalize, a stale agent chunk) is
+/// dropped unconditionally, never rendered.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
     /// Start a new session.
@@ -116,19 +142,48 @@ pub enum Input {
     /// The barge-in detector confirmed candidate speech during playback.
     BargeInConfirmed,
     /// An interim STT hypothesis for the in-progress utterance.
-    PartialTranscript(String),
+    PartialTranscript {
+        /// The turn this hypothesis belongs to.
+        turn: TurnId,
+        /// The hypothesis text.
+        text: String,
+    },
     /// The STT stream finalized the utterance.
-    FinalTranscript(String),
+    FinalTranscript {
+        /// The turn this transcript belongs to.
+        turn: TurnId,
+        /// The finalized text.
+        text: String,
+    },
     /// The submitted utterance was accepted by the agent backend.
-    SubmitSucceeded,
+    SubmitSucceeded {
+        /// The turn that was submitted.
+        turn: TurnId,
+    },
     /// The submitted utterance failed to reach/be accepted by the backend.
-    SubmitFailed(String),
+    SubmitFailed {
+        /// The turn that failed to submit.
+        turn: TurnId,
+        /// Why it failed.
+        error: String,
+    },
     /// A chunk of the agent's reply text arrived.
-    AgentTextArrived(String),
+    AgentTextArrived {
+        /// The turn this reply belongs to.
+        turn: TurnId,
+        /// The chunk of text.
+        text: String,
+    },
     /// The agent has no more text coming for this turn.
-    AgentTurnComplete,
+    AgentTurnComplete {
+        /// The turn that just finished producing text.
+        turn: TurnId,
+    },
     /// The output audio buffer has fully drained.
-    PlaybackDrained,
+    PlaybackDrained {
+        /// The turn whose audio just finished playing.
+        turn: TurnId,
+    },
     /// Caller wants the session torn down now (e.g. a stop button).
     StopRequested,
     /// The push-to-talk control was pressed.
@@ -155,7 +210,16 @@ pub enum Output {
     /// Render an interim transcript to the UI.
     ShowPartial(String),
     /// Send this finalized utterance to the agent backend.
-    SubmitUtterance(String),
+    ///
+    /// Carries the [`TurnId`] so the caller can tag the outbound request
+    /// and hand it straight back in [`Input::SubmitSucceeded`] or
+    /// [`Input::SubmitFailed`] when the round trip completes.
+    SubmitUtterance {
+        /// The turn this utterance belongs to.
+        turn: TurnId,
+        /// The finalized utterance text.
+        text: String,
+    },
     /// Stop playing the agent's audio immediately.
     CancelPlayback,
     /// Discard any buffered-but-unplayed output audio.
@@ -163,10 +227,17 @@ pub enum Output {
     /// Stop generating any further audio for this turn.
     CancelSynthesis(TurnId),
     /// Replay the buffered pre-roll audio (the start of what the user said).
-    ReplayPreRoll,
+    ///
+    /// Carries the [`TurnId`] just allocated for the barge-in candidate --
+    /// the caller should tag whatever STT stream it starts over that
+    /// replayed (and then live) audio with this turn, so a confirming
+    /// [`Input::PartialTranscript`]/[`Input::FinalTranscript`] is accepted.
+    ReplayPreRoll(TurnId),
     /// A barge-in turned out to be spurious; resume the agent's reply from
     /// the next un-synthesized chunk rather than discarding it.
-    ResumeSpeaking,
+    ///
+    /// Carries the [`TurnId`] of the agent turn to resume.
+    ResumeSpeaking(TurnId),
     /// The session's state just changed to this.
     EmitState(SessionState),
 }

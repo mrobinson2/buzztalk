@@ -59,6 +59,33 @@ fn max_utterance_forces_an_endpoint_after_30s() {
 }
 
 #[test]
+fn finalize_timeout_falls_back_to_listening_after_5s() {
+    let (mut m, turn) = common::to_finalizing();
+    assert_eq!(m.state(), SessionState::Finalizing);
+
+    let out = m.handle(Input::Tick(Duration::from_secs(4)));
+    assert_eq!(out, Vec::<Output>::new(), "not yet at the 5s threshold");
+    assert_eq!(m.state(), SessionState::Finalizing);
+
+    let out = m.handle(Input::Tick(Duration::from_secs(1)));
+    assert_eq!(
+        out,
+        vec![Output::EmitState(SessionState::Listening)],
+        "a stuck STT finalize falls back to Listening rather than hanging forever"
+    );
+    assert_eq!(m.state(), SessionState::Listening);
+    assert!(!m.is_current(turn));
+
+    // Sanity: the abandoned turn's final transcript, if it ever does show
+    // up, is now stale and dropped like any other late result.
+    let out = m.handle(Input::FinalTranscript {
+        turn,
+        text: "far too late".into(),
+    });
+    assert_eq!(out, Vec::<Output>::new());
+}
+
+#[test]
 fn ticks_in_states_with_no_active_timer_are_inert() {
     let mut m = SessionMachine::new();
     assert_eq!(
