@@ -28,7 +28,10 @@ impl Lcg {
         Lcg(seed)
     }
     fn next_f32(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         ((self.0 >> 33) as f32 / (1u64 << 31) as f32) - 1.0
     }
 }
@@ -70,7 +73,11 @@ fn simulate_echo(far: &[f32], delay_samples: usize, gain_db: f32) -> Vec<f32> {
     let gain = 10f32.powf(gain_db / 20.0);
     let mut rng = Lcg::new(0xC0FFEE);
     let mut near = vec![0.0f32; far.len()];
-    let reflections = [(delay_samples, 1.0f32), (delay_samples + 617, 0.35), (delay_samples + 1451, 0.15)];
+    let reflections = [
+        (delay_samples, 1.0f32),
+        (delay_samples + 617, 0.35),
+        (delay_samples + 1451, 0.15),
+    ];
     for (d, g) in reflections {
         for i in d..far.len() {
             near[i] += far[i - d] * g * gain;
@@ -206,7 +213,10 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("{:<28} {:>12}  {:>14}", "backend", "ERLE (dB)", "self-reported");
+    println!(
+        "{:<28} {:>12}  {:>14}",
+        "backend", "ERLE (dB)", "self-reported"
+    );
     println!("{:-<64}", "");
     for r in &results {
         let claimed = r

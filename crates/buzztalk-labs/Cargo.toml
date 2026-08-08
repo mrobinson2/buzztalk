@@ -15,7 +15,12 @@ aec-backends = ["dep:buzztalk-aec"]
 [dependencies]
 buzztalk-core.workspace = true
 buzztalk-aec = { workspace = true, optional = true }
+buzztalk-audio.workspace = true
 
 [[bin]]
 name = "erle-bench"
 path = "src/erle_bench.rs"
+
+[[bin]]
+name = "duplex-soak"
+path = "src/duplex_soak.rs"

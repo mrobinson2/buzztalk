@@ -83,7 +83,12 @@ fn generate_far_end(total_samples: usize) -> Vec<f32> {
 
 /// Synthesizes the near-end/capture stream as an acoustic echo of `far_end`:
 /// delayed, attenuated, plus a little noise.
-fn generate_echo(far_end: &[f32], delay_samples: usize, attenuation_db: f32, noise_amp: f32) -> Vec<f32> {
+fn generate_echo(
+    far_end: &[f32],
+    delay_samples: usize,
+    attenuation_db: f32,
+    noise_amp: f32,
+) -> Vec<f32> {
     let gain = 10f32.powf(attenuation_db / 20.0);
     let mut rng = Xorshift32::new(0xC0FFEE);
     let mut echo = Vec::with_capacity(far_end.len());
@@ -144,9 +149,15 @@ fn measure_reduction_db(canceller: &mut dyn EchoCanceller, far_end: &[f32], echo
 fn null_canceller_does_not_reduce_echo() {
     let total_samples = TOTAL_SECONDS * SAMPLE_RATE_HZ as usize;
     let far_end = generate_far_end(total_samples);
-    let echo = generate_echo(&far_end, (DELAY_MS as usize) * (SAMPLE_RATE_HZ as usize) / 1000, ATTENUATION_DB, NOISE_AMPLITUDE);
+    let echo = generate_echo(
+        &far_end,
+        (DELAY_MS as usize) * (SAMPLE_RATE_HZ as usize) / 1000,
+        ATTENUATION_DB,
+        NOISE_AMPLITUDE,
+    );
 
-    let mut canceller = buzztalk_aec::new_backend("null").expect("null backend is always available");
+    let mut canceller =
+        buzztalk_aec::new_backend("null").expect("null backend is always available");
     let reduction_db = measure_reduction_db(canceller.as_mut(), &far_end, &echo);
 
     eprintln!("null: {reduction_db:.2} dB \"reduction\" (should be ~0)");
@@ -160,7 +171,12 @@ fn null_canceller_does_not_reduce_echo() {
 fn real_backends_reduce_echo_meaningfully() {
     let total_samples = TOTAL_SECONDS * SAMPLE_RATE_HZ as usize;
     let far_end = generate_far_end(total_samples);
-    let echo = generate_echo(&far_end, (DELAY_MS as usize) * (SAMPLE_RATE_HZ as usize) / 1000, ATTENUATION_DB, NOISE_AMPLITUDE);
+    let echo = generate_echo(
+        &far_end,
+        (DELAY_MS as usize) * (SAMPLE_RATE_HZ as usize) / 1000,
+        ATTENUATION_DB,
+        NOISE_AMPLITUDE,
+    );
 
     let mut tested_any_real_backend = false;
     for name in available_backends() {

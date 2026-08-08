@@ -96,13 +96,71 @@ would plausibly beat both on real rooms, double-talk, and the edge cases neither
 had years of hardening against. Synthetic ERLE is the weakest evidence in this table; the
 real test is a laptop in a room.
 
-## Duplex engine
+## Duplex engine — RESULT
 
-*Results pending — `buzztalk-audio`.*
+`buzztalk-audio`: cpal 0.18 input + output, lock-free SPSC rings (ringbuf 0.5), exact
+480-sample framing, drop-and-count on overrun, macOS route detection via raw CoreAudio
+(`AudioObjectGetPropertyData` on `kAudioDevicePropertyTransportType`, disambiguating
+built-in via `kAudioDevicePropertyDataSource` because CoreAudio has no distinct transport
+type for the headphone jack).
 
 The requirement that makes or breaks the product: the exact samples written to the output
 device must also be published as a gap-free reference stream, including the silence written
-when nothing is queued. A reference with holes in it is a canceller that diverges.
+when nothing is queued. A reference with holes in it is a canceller that diverges. This is
+enforced by two tests — `render_reference_matches_playback_bit_exactly_at_native_rate` and
+`silent_output_still_publishes_to_render_reference`.
+
+17 tests pass (14 offline, 3 hardware). Offline coverage: ring wraparound, framing of
+arbitrary-length input, silence round-trip, overrun counters, resampler behaviour.
+
+### Gate 4 — 60 s duplex soak, run on real devices
+
+```
+ran 60.0s
+capture frames      : 6001
+render-ref frames   : 5999
+skew (cap - ref)    : +2 frames (20.0 ms)
+capture dropped     : 0 samples
+render-ref dropped  : 0 samples
+playback dropped    : 0 samples
+playback underrun   : 0 samples
+GATE 4 PASS — duplex stable, reference locked to capture.
+```
+
+Skew held at +1 to +2 frames for the whole run rather than growing, so there is no clock
+drift between capture and reference at this configuration. That is the number to watch: a
+reference that slips relative to capture destroys echo cancellation slowly, and the symptom
+appears much later as "barge-in randomly stopped working".
+
+The harness paces playback against the wall clock. An earlier unpaced run pushed ~8×
+real time and dropped 12.9 M samples — the counter caught it, which is itself evidence the
+backpressure path works, but the underrun figure only means something when pacing is honest.
+
+## Environment caveat — this machine cannot validate acoustics
+
+The development machine is a **Mac mini accessed remotely via Jump Desktop**. Its default
+audio device is a virtual driver (Phase Five Systems LLC, 8-in/8-out), not physical
+hardware:
+
+```
+input : ["Jump Desktop Microphone", "Jump Desktop Audio"]
+output: ["Mac mini Speakers", "Jump Desktop Microphone", "Jump Desktop Audio"]
+detect_output_route() -> unknown
+```
+
+`unknown` is the correct answer for a virtual device, and it degrades safely: `Unknown` is
+treated as `Speakers`, so the ERLE gate stays armed rather than assuming a headphone free
+pass. But three consequences follow, and none of them are code problems:
+
+1. **There is no acoustic loop here.** Every echo-cancellation number in this document is
+   synthetic. The 36.6 dB figure says the algorithm works; it does not say the product works
+   in a room.
+2. **The headphone fast path is untested on real hardware.** It is the demo's safety net, so
+   it needs a physical Mac with headphones plugged in before it can be relied on.
+3. **The launch demo cannot be recorded on this machine.** It needs a physical Mac, a real
+   microphone, and real speakers or headphones.
+
+Phase 1 should be validated on physical hardware before Phase 5 (barge-in) is trusted.
 
 ## Decisions taken here
 

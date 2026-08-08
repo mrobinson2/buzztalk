@@ -5,6 +5,7 @@ members = [
     "crates/buzztalk-audio",
     "crates/buzztalk-aec",
     "crates/buzztalk-labs",
+    "crates/buzztalk-vad",
 ]
 
 [workspace.package]
@@ -19,4 +20,5 @@ description = "Full-duplex voice conversation layer for Buzz"
 buzztalk-core = { path = "crates/buzztalk-core" }
 buzztalk-aec = { path = "crates/buzztalk-aec" }
 buzztalk-audio = { path = "crates/buzztalk-audio" }
+buzztalk-vad = { path = "crates/buzztalk-vad" }
 thiserror = "2"
