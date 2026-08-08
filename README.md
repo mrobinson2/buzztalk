@@ -16,7 +16,8 @@ Speech runs locally on your machine.
 | Duplex engine | 60 s soak: zero dropped frames, zero underruns, **no clock drift** between capture and the render reference. |
 | Real-time budget | **481 µs** per frame in release against a 10 ms budget — ~20× headroom. (A debug build takes 7182 µs. Run voice in release.) |
 | Render reference | Bit-exact with device output, silence included, enforced by test. |
-| Tests | 22 passing, plus 3 hardware tests behind `--ignored`. |
+| Barge-in gating | Fires on speech in 4 frames (**40 ms**). Rejects broadband coughs, keyboard clicks and door slams. |
+| Tests | **36 passing**, plus 3 hardware tests behind `--ignored`. |
 
 **Not yet proven:** every echo-cancellation number above is synthetic. The development
 machine is a remotely-accessed Mac mini whose default audio device is a virtual driver, so

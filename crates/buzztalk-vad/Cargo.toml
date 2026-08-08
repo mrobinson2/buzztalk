@@ -1,0 +1,11 @@
+[package]
+name = "buzztalk-vad"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic voice-activity detectors for BuzzTalk: permissive endpointing and strict, echo-gated barge-in"
+
+[dependencies]
+buzztalk-core.workspace = true
