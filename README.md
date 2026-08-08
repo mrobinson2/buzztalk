@@ -91,11 +91,16 @@ status, never spoken text.
 
 ## Platforms
 
-| | Status |
-|---|---|
-| macOS (Apple Silicon) | Tier 1 — primary development target |
-| Windows | Tier 1 — intended, not yet validated |
-| Linux | Tier 2 — audio-stack dependent; headphones recommended |
+| | Builds + tests in CI | Audio validated on real hardware |
+|---|---|---|
+| macOS (Apple Silicon) | yes | **no** — dev machine has only a virtual audio device |
+| Windows | yes | **no** |
+| Linux | yes | **no** |
+
+CI is green on all three, which means the code compiles everywhere and the offline suite
+passes everywhere. It does **not** mean voice works everywhere: no CI runner has an audio
+device, so every hardware path sits behind `#[ignore]`. Route detection is implemented for
+macOS only and returns `Unknown` elsewhere, which degrades safely to assuming an echo path.
 
 ## Licence
 
