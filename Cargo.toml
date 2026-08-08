@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/buzztalk-core",
+    "crates/buzztalk-audio",
+    "crates/buzztalk-aec",
+    "crates/buzztalk-labs",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+repository = "https://github.com/mrtek/buzztalk"
+description = "Full-duplex voice conversation layer for Buzz"
+
+[workspace.dependencies]
+buzztalk-core = { path = "crates/buzztalk-core" }
+buzztalk-aec = { path = "crates/buzztalk-aec" }
+buzztalk-audio = { path = "crates/buzztalk-audio" }
+thiserror = "2"

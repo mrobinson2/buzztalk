@@ -1,0 +1,21 @@
+[package]
+name = "buzztalk-labs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Phase 0 measurement harnesses. Not part of the shipped product."
+publish = false
+
+[features]
+# Enabled once `buzztalk-aec` has at least one real backend to measure.
+aec-backends = ["dep:buzztalk-aec"]
+
+[dependencies]
+buzztalk-core.workspace = true
+buzztalk-aec = { workspace = true, optional = true }
+
+[[bin]]
+name = "erle-bench"
+path = "src/erle_bench.rs"

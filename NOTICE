@@ -1,0 +1,59 @@
+BuzzTalk
+Copyright 2026 the BuzzTalk authors
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+THIRD-PARTY NOTICES
+================================================================================
+
+BuzzTalk integrates with Buzz (https://github.com/block/buzz), Copyright Block,
+Inc., licensed under the Apache License, Version 2.0.
+
+BuzzTalk drives speech models that Buzz acquires and caches. Those models carry
+their own licences, and the obligations travel with any binary that ships or
+downloads them. They are recorded here because attribution under CC-BY-4.0 is a
+live requirement, not a formality.
+
+--------------------------------------------------------------------------------
+Speech recognition
+--------------------------------------------------------------------------------
+
+NVIDIA Parakeet TDT-CTC 110M (English)
+  Model weights: Creative Commons Attribution 4.0 International (CC-BY-4.0)
+  https://creativecommons.org/licenses/by/4.0/
+  Original model: https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
+  ONNX conversion distributed by the sherpa-onnx project (k2-fsa),
+  Apache License 2.0: https://github.com/k2-fsa/sherpa-onnx
+
+--------------------------------------------------------------------------------
+Speech synthesis
+--------------------------------------------------------------------------------
+
+Kyutai Pocket TTS and Mimi
+  Creative Commons Attribution 4.0 International (CC-BY-4.0)
+  https://kyutai.org/
+
+Pocket TTS ONNX export
+  KevinAHM/pocket-tts-onnx, CC-BY-4.0
+
+Reference voices (VCTK presets, ai-coustics enhanced)
+  kyutai/tts-voices, CC-BY-4.0
+
+--------------------------------------------------------------------------------
+Runtime and audio libraries
+--------------------------------------------------------------------------------
+
+sherpa-onnx (k2-fsa)                    Apache License 2.0
+ONNX Runtime / ort                      MIT / Apache License 2.0
+cpal, rodio, rubato, ringbuf            MIT / Apache License 2.0
+opus / libopus                          BSD 3-Clause
+neteq                                   see crate metadata
+
+Echo cancellation, where a WebRTC-derived implementation is enabled:
+  WebRTC audio processing code          BSD 3-Clause, Copyright The WebRTC project authors
+
+Each dependency's full licence text is reproduced in its own distribution and is
+available through `cargo license` / `cargo about` against this workspace.
