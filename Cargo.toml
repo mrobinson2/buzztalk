@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
-repository = "https://github.com/mrtek/buzztalk"
+repository = "https://github.com/mrobinson2/buzztalk"
 description = "Full-duplex voice conversation layer for Buzz"
 
 [workspace.dependencies]
