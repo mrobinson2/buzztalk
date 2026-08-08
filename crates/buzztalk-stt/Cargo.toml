@@ -1,0 +1,13 @@
+[package]
+name = "buzztalk-stt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Offline-model speech recognition for BuzzTalk with pseudo-streaming partials"
+
+[dependencies]
+buzztalk-core.workspace = true
+thiserror.workspace = true
+sherpa-onnx = "1.13"

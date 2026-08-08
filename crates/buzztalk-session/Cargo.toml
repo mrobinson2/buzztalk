@@ -1,0 +1,10 @@
+[package]
+name = "buzztalk-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Conversation state machine and turn model for BuzzTalk. Depends on buzztalk-core only; driven entirely by injected events."
+
+[dependencies]
+buzztalk-core.workspace = true

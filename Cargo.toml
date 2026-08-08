@@ -6,6 +6,9 @@ members = [
     "crates/buzztalk-aec",
     "crates/buzztalk-labs",
     "crates/buzztalk-vad",
+    "crates/buzztalk-stt",
+    "crates/buzztalk-session",
+    "crates/buzztalk-tts",
 ]
 
 [workspace.package]
@@ -21,4 +24,7 @@ buzztalk-core = { path = "crates/buzztalk-core" }
 buzztalk-aec = { path = "crates/buzztalk-aec" }
 buzztalk-audio = { path = "crates/buzztalk-audio" }
 buzztalk-vad = { path = "crates/buzztalk-vad" }
+buzztalk-stt = { path = "crates/buzztalk-stt" }
+buzztalk-session = { path = "crates/buzztalk-session" }
+buzztalk-tts = { path = "crates/buzztalk-tts" }
 thiserror = "2"
