@@ -1,0 +1,40 @@
+[package]
+name = "buzztalk-aec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Acoustic echo cancellation backends for BuzzTalk (bake-off crate)"
+
+# Note: rust-version deliberately NOT inherited from the workspace here. The
+# `sonora` candidate declares an MSRV of 1.91, above the workspace's 1.82
+# floor; the toolchain actually in use (1.97.1) satisfies both, so this only
+# affects `cargo add`'s advisory MSRV check, not real compilation.
+
+[dependencies]
+buzztalk-core.workspace = true
+thiserror.workspace = true
+
+# Candidate 1: Rust bindings to WebRTC's C++ Audio Processing Module.
+# Needs cmake/meson+ninja to build the bundled C++ sources (see README/report:
+# not available in this environment, so this feature does not build here).
+webrtc-audio-processing = { version = "2", optional = true }
+
+# Candidate 2: pure-Rust port of WebRTC's AEC3.
+aec3 = { version = "0.3", optional = true }
+
+# Candidate 3: pure-Rust WebRTC-derived audio processing (AEC/NS/AGC).
+sonora = { version = "0.2", optional = true }
+
+[features]
+# `sonora` is the bake-off winner: it and `aec3` are the only candidates that
+# build in this environment (see crate docs), and `sonora` both measured a
+# higher synthetic echo reduction (~20 dB vs ~15.6 dB, see
+# tests/echo_cancellation.rs) and integrates natively -- unlike `aec3`, its
+# processor is `Send` without a worker-thread wrapper.
+default = ["backend-sonora"]
+backend-webrtc-audio-processing = ["dep:webrtc-audio-processing"]
+backend-aec3 = ["dep:aec3"]
+backend-sonora = ["dep:sonora"]
+
+[dev-dependencies]

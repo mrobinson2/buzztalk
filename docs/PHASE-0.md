@@ -59,15 +59,42 @@ excellent here and disappoint in a room.
 
 Harness validated: doing nothing measures as doing nothing.
 
-## Backend bake-off
-
-*Results pending — populated from the `buzztalk-aec` evaluation.*
+## Backend bake-off — RESULT
 
 | candidate | version | builds | needs cmake/meson | ERLE (dB) | notes |
 |---|---|---|---|---|---|
-| `webrtc-audio-processing` | | | | | |
-| `aec3` | | | | | |
-| `sonora` | | | | | |
+| `webrtc-audio-processing` | 2.1.0 | **no** | **yes** | — | Dynamic path needs `pkg-config` (absent). `bundled` feature needs `meson` (absent): *"Failed to execute meson."* Not installed — reporting, not silently fixing. |
+| `sonora` | 0.2.0 | yes | no (pure Rust) | **36.6** | `AudioProcessing` is natively `Send`; API maps ~1:1 onto `EchoCanceller`. MSRV 1.91. |
+| `aec3` | 0.3.1 | yes | no (pure Rust) | **35.2** | `LinearPipeline` holds an `Rc`-based graph runtime and is **not `Send`**, which collides with `EchoCanceller: Send`. Needs a worker thread + channels to use at all. |
+| passthrough | — | — | — | **0.0** | Control. |
+
+Measured twice with different excitation, and the gap between the two real backends is not
+stable: on spectrally-tilted broadband noise they separated by ~4.4 dB (20.0 vs 15.6), on
+the harness above — which adds three reflections and a soft-clip non-linearity — they land
+within 1.4 dB of each other (36.6 vs 35.2). **The dB difference is signal-dependent and is
+not a sound basis for choosing.** Both clear the gate by a wide margin.
+
+Two findings worth keeping:
+
+- A swept-tone chirp made *both* real backends look broken (≈0 dB). That is AEC3-family
+  behaviour correctly declining to adapt on ill-conditioned narrowband excitation, not a
+  defect. Any future benchmark must use broadband excitation or it will draw the wrong
+  conclusion.
+- Noise suppression and AGC2 are disabled in both wrappers. AGC2 re-normalises output
+  loudness, which would mask the energy reduction being measured and make the numbers
+  meaningless.
+
+### Decision: default to `sonora`
+
+Not because it measured higher — that margin is within signal noise. Because it is `Send`
+and needs no thread-confinement workaround, so it is the lower-risk integration. `aec3`
+stays available behind a feature as a second opinion.
+
+**Revisit `webrtc-audio-processing` if `pkg-config` + `meson`/`ninja` are installed.** It
+wraps the actual production WebRTC APM that both pure-Rust crates are reimplementing, and
+would plausibly beat both on real rooms, double-talk, and the edge cases neither port has
+had years of hardening against. Synthetic ERLE is the weakest evidence in this table; the
+real test is a laptop in a room.
 
 ## Duplex engine
 
