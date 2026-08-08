@@ -1,0 +1,22 @@
+[package]
+name = "buzztalk-tts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Streaming text-to-speech for BuzzTalk via Kyutai Pocket TTS"
+
+[dependencies]
+buzztalk-core.workspace = true
+thiserror.workspace = true
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["ndarray", "std", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
+rand = "0.10"
+sentencepiece-model = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+hound = "3"
+
+[dev-dependencies]
+tempfile = "3"
+
