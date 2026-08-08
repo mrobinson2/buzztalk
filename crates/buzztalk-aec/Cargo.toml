@@ -16,8 +16,14 @@ buzztalk-core.workspace = true
 thiserror.workspace = true
 
 # Candidate 1: Rust bindings to WebRTC's C++ Audio Processing Module.
-# Needs cmake/meson+ninja to build the bundled C++ sources (see README/report:
-# not available in this environment, so this feature does not build here).
+# Dynamic-link path needs system pkg-config + a prebuilt libwebrtc-audio-processing-2.
+# `bundled` feature builds WebRTC's C++ from source via meson+ninja (not
+# cmake) instead. Builds cleanly now that pkg-config/meson/ninja are
+# installed (~28s clean build, see crate docs); measured ~15.4 dB echo
+# reduction on the bake-off's synthetic test, essentially tied with `aec3`
+# and behind `sonora`'s ~20.0 dB. Not the default -- see crate docs for the
+# tradeoff (a C++/meson build dependency vs. two pure-Rust options that beat
+# or matched it here).
 webrtc-audio-processing = { version = "2", optional = true }
 
 # Candidate 2: pure-Rust port of WebRTC's AEC3.
@@ -27,13 +33,15 @@ aec3 = { version = "0.3", optional = true }
 sonora = { version = "0.2", optional = true }
 
 [features]
-# `sonora` is the bake-off winner: it and `aec3` are the only candidates that
-# build in this environment (see crate docs), and `sonora` both measured a
-# higher synthetic echo reduction (~20 dB vs ~15.6 dB, see
-# tests/echo_cancellation.rs) and integrates natively -- unlike `aec3`, its
-# processor is `Send` without a worker-thread wrapper.
+# `sonora` remains the default pending a decision on `webrtc-audio-processing`
+# (see crate docs): it measured the highest synthetic echo reduction of all
+# three candidates now that all three build (~20.0 dB vs ~15.6 dB for `aec3`
+# and ~15.4 dB for `webrtc`, see tests/echo_cancellation.rs), and it
+# integrates natively -- unlike `aec3` (needs a worker-thread `Send` wrapper)
+# and unlike `webrtc` (needs meson+ninja on every contributor's machine and
+# all three CI platforms).
 default = ["backend-sonora"]
-backend-webrtc-audio-processing = ["dep:webrtc-audio-processing"]
+backend-webrtc = ["dep:webrtc-audio-processing", "webrtc-audio-processing/bundled"]
 backend-aec3 = ["dep:aec3"]
 backend-sonora = ["dep:sonora"]
 

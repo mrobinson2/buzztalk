@@ -31,7 +31,7 @@ const ATTENUATION_DB: f32 = -12.0;
 const NOISE_AMPLITUDE: f32 = 0.01;
 const TOTAL_SECONDS: usize = 6;
 /// Skip this much of the run before measuring, to let adaptive filters
-/// converge. Convergence happens within roughly a second for both real
+/// converge. Convergence happens within roughly a second for all three real
 /// backends in practice; three seconds is a generous margin.
 const CONVERGENCE_SECONDS: usize = 3;
 

@@ -84,17 +84,54 @@ Two findings worth keeping:
   loudness, which would mask the energy reduction being measured and make the numbers
   meaningless.
 
+### Re-test after installing meson + ninja
+
+`webrtc-audio-processing` 2.1.0 **does** build via its `bundled` feature once `meson` and
+`ninja` are present (it never needed cmake). ~28 s to rebuild on an 8-core Apple Silicon
+box with a warm cargo registry; realistically 1–3 minutes cold on a CI runner. That cost is
+paid by every contributor and all three CI platforms, on every clean build, forever.
+
+Measured on the harness above — reflections plus soft-clip non-linearity, i.e. the harder
+of the two signals:
+
+| backend | ERLE measured | ERLE **self-reported** |
+|---|---|---|
+| `sonora` | **36.6 dB** | 28.4 dB |
+| `aec3` | 35.2 dB | 26.6 dB |
+| `webrtc` | 35.1 dB | **0.2 dB** |
+| passthrough | 0.0 dB | — |
+
+All three land within 1.5 dB. The reference WebRTC APM — the implementation both pure-Rust
+crates are reproducing — does not win, on either the simple signal or the hard one.
+
+**The decisive finding is in the right-hand column, not the left.** `webrtc` reports 0.2 dB
+of echo return loss enhancement while actually delivering 35.1 dB. Its internal metric does
+not track reality.
+
+That is not cosmetic. `BargeInDetector` gates acoustic interruption on `AecStats::erle_db`
+and suppresses detection below a 12 dB floor, because a canceller that is not keeping up
+means anything "heard" is probably the agent's own voice. A backend that under-reports ERLE
+by 35 dB would permanently fail that gate — cancelling echo perfectly well while silently
+disabling barge-in, which is the entire product. It would present as "voice works but
+interruption doesn't", on some machines and not others, and would be extremely hard to trace
+back to a stats accessor.
+
+`sonora` (28.4 vs 36.6 measured) and `aec3` (26.6 vs 35.2) both under-report modestly and
+directionally correctly, which is what the gate needs.
+
 ### Decision: default to `sonora`
 
 Not because it measured higher — that margin is within signal noise. Because it is `Send`
 and needs no thread-confinement workaround, so it is the lower-risk integration. `aec3`
 stays available behind a feature as a second opinion.
 
-**Revisit `webrtc-audio-processing` if `pkg-config` + `meson`/`ninja` are installed.** It
-wraps the actual production WebRTC APM that both pure-Rust crates are reimplementing, and
-would plausibly beat both on real rooms, double-talk, and the edge cases neither port has
-had years of hardening against. Synthetic ERLE is the weakest evidence in this table; the
-real test is a laptop in a room.
+`webrtc` remains available behind `backend-webrtc` for anyone who wants the reference
+implementation, but it is not the default and its `stats()` reporting must be fixed before
+it could be. The prediction recorded here earlier — that the real APM would beat both ports
+once it could build — was tested and did not hold on either signal.
+
+Synthetic ERLE is still the weakest evidence in this document. The real test is a laptop in
+a room, and it has not been run.
 
 ## Duplex engine — RESULT
 
