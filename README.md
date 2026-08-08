@@ -67,8 +67,10 @@ cpal duplex engine (one process, one clock)
 | `buzztalk-core` | Types and traits. Zero I/O, zero engine dependencies. |
 | `buzztalk-audio` | cpal duplex engine, lock-free rings, render-reference tap, output-route detection. |
 | `buzztalk-aec` | `EchoCanceller` implementations, feature-gated, plus a null fallback. |
+| `buzztalk-vad` | Endpoint and barge-in detectors, ERLE- and route-gated. |
+| `buzztalk-labs` | Measurement harnesses. Not shipped; exists to produce evidence. |
 
-Planned: `buzztalk-vad`, `buzztalk-stt`, `buzztalk-tts`, `buzztalk-session`,
+Planned: `buzztalk-stt`, `buzztalk-tts`, `buzztalk-session`,
 `buzztalk-buzz`, `buzztalk-telephony`, `buzztalkd`.
 
 ## Design rules
