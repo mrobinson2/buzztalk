@@ -5,8 +5,10 @@
 Talk to your agents. Hear them respond. Interrupt them naturally.
 Speech runs locally on your machine.
 
-> **Status: pre-alpha.** The audio foundation is built and measured; there is nothing to
-> install yet, and it does not talk to Buzz yet.
+> **Status: alpha** — [v0.1.0-alpha.1](https://github.com/mrobinson2/buzztalk/releases/tag/v0.1.0-alpha.1).
+> The full conversation loop works and talks to a real Buzz relay. The acoustic path is
+> **not** yet validated on physical hardware — use headphones. See
+> [`docs/HARDWARE-VALIDATION.md`](docs/HARDWARE-VALIDATION.md).
 
 ## Where this actually is
 
@@ -17,12 +19,20 @@ Speech runs locally on your machine.
 | Real-time budget | **481 µs** per frame in release against a 10 ms budget — ~20× headroom. (A debug build takes 7182 µs. Run voice in release.) |
 | Render reference | Bit-exact with device output, silence included, enforced by test. |
 | Barge-in gating | Fires on speech in 4 frames (**40 ms**). Rejects broadband coughs, keyboard clicks and door slams. |
+| Barge-in → playback silent | **7.1 – 15.5 ms** end to end |
+| End-of-speech → final transcript | 72 – 203 ms |
+| TTS warm synthesis | ~4× real time |
 | Tests | **36 passing**, plus 3 hardware tests behind `--ignored`. |
+
+**Proven end to end against a real Buzz relay.** `buzztalkd` authenticated over NIP-42,
+published a signed `kind:9` event with the correct `h` and `p` tags, and the message was
+read back using Buzz's own CLI.
 
 **Not yet proven:** every echo-cancellation number above is synthetic. The development
 machine is a remotely-accessed Mac mini whose default audio device is a virtual driver, so
 it has no acoustic loop and cannot validate the thing that matters most — a real microphone
-hearing a real speaker in a real room. See [`docs/PHASE-0.md`](docs/PHASE-0.md).
+hearing a real speaker in a real room. **Barge-in over loudspeakers is unverified.** See
+[`docs/PHASE-0.md`](docs/PHASE-0.md) for the full measurement record.
 
 ---
 
