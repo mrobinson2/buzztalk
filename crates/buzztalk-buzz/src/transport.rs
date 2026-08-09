@@ -16,7 +16,7 @@ use std::net::TcpStream;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use nostr::event::{Event, EventBuilder, FinalizeEvent, Kind};
+use nostr::event::{Event, EventBuilder, EventId, FinalizeEvent, Kind};
 use nostr::filter::{Filter, SingleLetterTag};
 use nostr::key::{Keys, PublicKey};
 use nostr::message::{ClientMessage, RelayMessage, SubscriptionId};
@@ -184,13 +184,20 @@ fn serve(
     reply_tx: &Sender<String>,
 ) -> SessionOutcome {
     let own_pubkey = keys.public_key();
+    // Signed 👀 reactions awaiting their target message's relay OK before
+    // they can be sent (see `publish`). Small: at most a couple in flight.
+    let mut pending_reactions: Vec<(EventId, Event)> = Vec::new();
     loop {
         match cmd_rx.try_recv() {
             Ok(Command::Shutdown) => {
                 let _ = socket.close(None);
                 return SessionOutcome::Shutdown;
             }
-            Ok(Command::Publish(text)) => publish(socket, config, keys, &text),
+            Ok(Command::Publish(text)) => {
+                if let Some(pending) = publish(socket, config, keys, &text) {
+                    pending_reactions.push(pending);
+                }
+            }
             Err(TryRecvError::Empty) => {}
             // The `BuzzAgent` was dropped without an explicit Shutdown
             // (e.g. process exit) -- same effect, since nothing will ever
@@ -203,7 +210,17 @@ fn serve(
 
         match socket.read() {
             Ok(Message::Text(text)) => {
-                handle_relay_text(&text, config, &own_pubkey, reply_tx);
+                if let Some(confirmed) = handle_relay_text(&text, config, &own_pubkey, reply_tx) {
+                    // The relay committed a message we published; send its
+                    // held 👀 reaction now that the target exists.
+                    if let Some(pos) = pending_reactions.iter().position(|(id, _)| *id == confirmed)
+                    {
+                        let (_, reaction) = pending_reactions.remove(pos);
+                        if let Err(e) = send(socket, ClientMessage::event(reaction)) {
+                            eprintln!("buzztalk-buzz: listening reaction not sent: {e}");
+                        }
+                    }
+                }
             }
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
             Ok(Message::Close(_)) => {
@@ -216,14 +233,17 @@ fn serve(
     }
 }
 
+/// Returns the event id when the relay reports a successful publish
+/// (`OK … true`), so the caller can release that message's held reaction;
+/// `None` for every other message.
 fn handle_relay_text(
     text: &str,
     config: &BuzzConfig,
     own_pubkey: &PublicKey,
     reply_tx: &Sender<String>,
-) {
+) -> Option<EventId> {
     let Ok(msg) = RelayMessage::from_json(text) else {
-        return; // Not a message shape we understand -- ignore rather than fail the session.
+        return None; // Not a message shape we understand -- ignore rather than fail the session.
     };
     match msg {
         RelayMessage::Event { event, .. } => {
@@ -239,70 +259,79 @@ fn handle_relay_text(
             // A rejection here is the expected, frequent case (most
             // channel traffic isn't a speakable agent reply) -- not logged
             // per-event to avoid drowning real signal in channel noise.
+            None
         }
         RelayMessage::Notice(notice) => {
             eprintln!("buzztalk-buzz: relay notice: {notice}");
+            None
         }
         RelayMessage::Closed { message, .. } => {
             eprintln!("buzztalk-buzz: subscription closed by relay: {message}");
+            None
         }
+        RelayMessage::Ok {
+            status: true,
+            event_id,
+            ..
+        } => Some(event_id),
         RelayMessage::Ok {
             status: false,
             message,
             ..
         } => {
             eprintln!("buzztalk-buzz: relay rejected a published event: {message}");
+            None
         }
         // A relay-initiated re-auth challenge mid-session, or any other
         // message this loop doesn't act on. Re-authentication mid-session
         // is not implemented -- see this crate's report for why that's an
         // accepted, documented gap rather than a silent one.
-        _ => {}
+        _ => None,
     }
 }
 
-fn publish(socket: &mut Socket, config: &BuzzConfig, keys: &Keys, text: &str) {
+/// Publish a turn submission. On success, returns the signed 👀 "listening"
+/// reaction to that message, *unsent*, paired with the message id it
+/// targets. The caller holds it until the relay OKs the message and then
+/// sends it — a reaction published in the same breath as its target is
+/// rejected (`reaction target event not found`) because the relay hasn't
+/// committed the message yet. Returns `None` if nothing was published or
+/// the reaction couldn't be built.
+fn publish(
+    socket: &mut Socket,
+    config: &BuzzConfig,
+    keys: &Keys,
+    text: &str,
+) -> Option<(EventId, Event)> {
     let builder = match events::build_stream_message(config.channel_id, text, &config.agent_pubkeys)
     {
         Ok(b) => b,
         Err(e) => {
             eprintln!("buzztalk-buzz: refusing to publish turn submission: {e}");
-            return;
+            return None;
         }
     };
     let event = match sign(builder, keys) {
         Ok(ev) => ev,
         Err(e) => {
             eprintln!("buzztalk-buzz: failed to sign turn submission: {e}");
-            return;
+            return None;
         }
     };
     let message_id = event.id;
     let author = event.pubkey;
     if let Err(e) = send(socket, ClientMessage::event(event)) {
         eprintln!("buzztalk-buzz: failed to publish turn submission: {e}");
-        return;
+        return None;
     }
 
-    // Immediately react 👀 to the just-published message so the channel
-    // shows the spoken message was captured and posted, without waiting on
-    // an agent round-trip -- the voice analogue of the app's eyes
-    // reaction. Best-effort: a failed reaction never fails the turn.
-    match events::build_reaction(
-        config.channel_id,
-        &message_id,
-        &author,
-        events::LISTENING_REACTION,
-    )
-    .and_then(|b| sign(b, keys).map_err(|e| crate::error::BuzzError::EventBuild(e.to_string())))
-    {
-        Ok(reaction) => {
-            if let Err(e) = send(socket, ClientMessage::event(reaction)) {
-                eprintln!("buzztalk-buzz: listening reaction not sent: {e}");
-            }
-        }
-        Err(e) => eprintln!("buzztalk-buzz: could not build listening reaction: {e}"),
-    }
+    // Build+sign the 👀 reaction now, but hand it back for the loop to send
+    // once the relay confirms the message exists.
+    events::build_reaction(config.channel_id, &message_id, &author, events::LISTENING_REACTION)
+        .and_then(|b| sign(b, keys).map_err(|e| crate::error::BuzzError::EventBuild(e.to_string())))
+        .map(|reaction| (message_id, reaction))
+        .map_err(|e| eprintln!("buzztalk-buzz: could not build listening reaction: {e}"))
+        .ok()
 }
 
 fn sign_auth_event(
