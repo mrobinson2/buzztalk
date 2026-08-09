@@ -172,6 +172,54 @@ pub struct VoiceProcessingEngine {
     counters: Arc<Counters>,
 }
 
+/// Configure and activate the process-wide `AVAudioSession` iOS requires
+/// before any audio unit will deliver microphone input.
+///
+/// Category `.playAndRecord` with mode `.voiceChat`: the voice-chat mode is
+/// what routes capture through the system's own echo cancellation and asks
+/// Bluetooth for the right HFP treatment (it implicitly sets
+/// `AllowBluetoothHFP`) — the iOS equivalent of the whole reason
+/// `VoiceProcessingIO` exists. macOS has no session gate and skips this
+/// entirely (the call is `cfg(target_os = "ios")`).
+///
+/// Route changes and interruptions (AirPods connect/disconnect, a phone
+/// call, Siri) are *not* handled here — those arrive as `AVAudioSession`
+/// notifications the host app observes, and map onto the orchestrator's
+/// existing engine-rebuild path exactly like a macOS device change. Wiring
+/// those notifications is the app-integration layer's job, not this
+/// engine's; see `docs/IOS-VOICE-PORT.md`.
+#[cfg(target_os = "ios")]
+fn configure_ios_audio_session() -> Result<()> {
+    use objc2_avf_audio::{
+        AVAudioSession, AVAudioSessionCategoryOptions, AVAudioSessionCategoryPlayAndRecord,
+        AVAudioSessionModeVoiceChat,
+    };
+
+    // SAFETY: standard AVAudioSession singleton configuration. Each call
+    // returns a `Result` we surface; nothing is retained past this scope
+    // except the shared session, which is process-global by design.
+    unsafe {
+        let session = AVAudioSession::sharedInstance();
+        let category = AVAudioSessionCategoryPlayAndRecord.ok_or_else(|| {
+            Error::Device("AVAudioSessionCategoryPlayAndRecord unavailable".into())
+        })?;
+        let mode = AVAudioSessionModeVoiceChat
+            .ok_or_else(|| Error::Device("AVAudioSessionModeVoiceChat unavailable".into()))?;
+        // DuckOthers keeps other apps' audio down while the agent speaks;
+        // DefaultToSpeaker keeps the loud speaker (not the earpiece) as the
+        // fallback route when no headset is attached.
+        let options = AVAudioSessionCategoryOptions::DuckOthers
+            | AVAudioSessionCategoryOptions::DefaultToSpeaker;
+        session
+            .setCategory_mode_options_error(category, mode, options)
+            .map_err(|e| Error::Device(format!("AVAudioSession setCategory failed: {e:?}")))?;
+        session
+            .setActive_error(true)
+            .map_err(|e| Error::Device(format!("AVAudioSession setActive failed: {e:?}")))?;
+    }
+    Ok(())
+}
+
 impl VoiceProcessingEngine {
     /// Create and start a `VoiceProcessingIO` audio unit covering both
     /// capture and render.
@@ -189,6 +237,12 @@ impl VoiceProcessingEngine {
             output_device: _ignored_output_device,
             preferred_buffer_frames: _ignored_preferred_buffer_frames,
         } = config;
+
+        // On iOS, no audio unit will produce input until the process has an
+        // active AVAudioSession in a record-capable category. macOS has no
+        // such gate. This must run before the unit is initialized.
+        #[cfg(target_os = "ios")]
+        configure_ios_audio_session()?;
 
         let mut audio_unit = AudioUnit::new_uninitialized(IOType::VoiceProcessingIO)
             .map_err(|e| Error::Device(format!("creating VoiceProcessingIO audio unit: {e}")))?;

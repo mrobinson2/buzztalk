@@ -125,3 +125,40 @@ Flutter, add a button — in that order, proving each on real hardware before
 the next. The hard question that could have sunk it — full-duplex
 interruptible voice over Bluetooth — was answered on macOS this session
 with the same API iOS will use.
+
+---
+
+## Build status (started 2026-08-09)
+
+First cutting session. What actually compiles for `aarch64-apple-ios`:
+
+| Crate | iOS cross-compile | Notes |
+|---|---|---|
+| `buzztalk-core`, `buzztalk-session`, `buzztalk-vad` | **compiles** | Pure Rust, first try, zero changes. The turn machine, endpointing, and barge-in gate port as-is. |
+| `buzztalk-audio` incl. `VoiceProcessingEngine` | **compiles** | VPIO cfg extended from `macos` to `any(macos, ios)`; new `configure_ios_audio_session()` (category `.playAndRecord`, mode `.voiceChat`, DuckOthers+DefaultToSpeaker) via `objc2-avf-audio`, gated `cfg(ios)`. The CoreAudio HAL (device enum / route detection) stays macOS-only; `route.rs` already returns `Unknown` on iOS. **The hard part — the full-duplex Bluetooth engine — compiles for the phone.** |
+| `buzztalk-ffi` (new) | builds on host | C ABI over the pipeline for Flutter `dart:ffi`: `buzztalk_start / poll_event / string_free / stop`, key passed as a file path never a raw string. Its iOS *link* waits on the STT blocker below. |
+| `buzztalk-pipeline` / `buzztalk-buzz` / `buzztalk-ffi` | **blocked** | Two independent blockers, both predicted, neither in our code. |
+
+### The two blockers (both external, both expected)
+
+1. **No full Xcode.** This machine has Command Line Tools only; `xcrun`
+   can't locate the `iphoneos` SDK. Any dependency with a C/asm build
+   script (e.g. `ring`) fails to cross-compile. Fix: install Xcode. Pure
+   Rust and the objc2 binding crates don't need it, which is why the audio
+   engine compiles and `ring` doesn't.
+2. **STT runtime has no iOS build wired.** `buzztalk-stt` → `sherpa-onnx`
+   → `sherpa-onnx-sys`, whose build downloads/links onnxruntime and pulls
+   `ureq`/`rustls`/`ring`. It has no iOS target support out of the box.
+   Fix: link a prebuilt iOS `onnxruntime.xcframework` and teach
+   `sherpa-onnx-sys` (or a shim) to use it instead of its host downloader.
+   This is the single biggest remaining task and the one the on-device
+   compute question (10 ms budget) rides on.
+
+### Net
+
+The architectural risk retired earlier — full-duplex interruptible voice
+over Bluetooth on VoiceProcessingIO — now also **compiles for iOS**. What
+remains before a phone can run it is toolchain (install Xcode) and the STT
+runtime's iOS build, plus TTS the same way, then the FFI links and the
+Flutter mic-button integration begins. No new architectural unknowns
+surfaced this session.

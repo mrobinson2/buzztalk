@@ -12,6 +12,7 @@ members = [
     "crates/buzztalk-pipeline",
     "crates/buzztalk-buzz",
     "crates/buzztalk-models",
+    "crates/buzztalk-ffi",
 ]
 
 [workspace.package]

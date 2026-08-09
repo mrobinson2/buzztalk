@@ -1,0 +1,17 @@
+[package]
+name = "buzztalk-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "C ABI over the BuzzTalk conversation pipeline, for Flutter/dart:ffi (iOS/Android app integration)"
+
+[lib]
+# staticlib for iOS (linked into the app binary); cdylib for Android/dev.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+buzztalk-pipeline.workspace = true
+buzztalk-buzz.workspace = true
+buzztalk-session.workspace = true

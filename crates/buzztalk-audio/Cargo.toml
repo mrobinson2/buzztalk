@@ -15,8 +15,20 @@ thiserror.workspace = true
 cpal = "0.18"
 ringbuf = "0.5"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "objc2", "AudioHardware"] }
+# VoiceProcessingIO and its property constants exist on both macOS and iOS
+# — same audio unit, same coreaudio-rs.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "objc2"] }
 coreaudio-rs = "0.14"
 objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AUComponent", "AudioUnitProperties", "AudioOutputUnit", "AudioComponent"] }
+
+# The CoreAudio HAL (device enumeration, output-route detection) is a
+# macOS-only API — iOS has no equivalent; `route.rs` returns Unknown there.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "objc2", "AudioHardware"] }
+
+# AVAudioSession is required on iOS (and only iOS) to make any audio unit
+# produce input; macOS has no session gate.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }

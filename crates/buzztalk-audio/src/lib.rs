@@ -40,12 +40,15 @@
 mod framing;
 mod resample;
 mod route;
-#[cfg(target_os = "macos")]
+// VoiceProcessingIO exists identically on macOS and iOS — same audio unit,
+// same coreaudio-rs. iOS additionally requires an AVAudioSession to be
+// configured (see `vpio::configure_ios_audio_session`); macOS does not.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod vpio;
 
 pub use framing::FrameReader;
 pub use route::detect_output_route;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use vpio::VoiceProcessingEngine;
 
 use buzztalk_core::{Error, Result, FRAME_SAMPLES, SAMPLE_RATE_HZ};
