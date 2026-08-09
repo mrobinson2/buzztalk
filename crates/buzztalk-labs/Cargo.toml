@@ -29,3 +29,8 @@ path = "src/duplex_soak.rs"
 name = "live-aec"
 path = "src/live_aec.rs"
 required-features = ["aec-backends"]
+
+[[bin]]
+name = "hw-validate"
+path = "src/hw_validate.rs"
+required-features = ["aec-backends"]
