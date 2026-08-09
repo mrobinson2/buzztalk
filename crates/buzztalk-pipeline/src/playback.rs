@@ -159,6 +159,13 @@ impl PlaybackState {
         self.live_turn == Some(turn)
     }
 
+    /// The turn currently allowed to be heard, if any -- e.g. so a caller
+    /// that's just observed the live buffer fully drain can tell the
+    /// session machine which turn that was.
+    pub(crate) fn live_turn(&self) -> Option<TurnId> {
+        self.live_turn
+    }
+
     /// Whether some turn is recognised (live, or paused pending
     /// retraction) -- i.e. whether a caller should bother trying to feed
     /// this turn's text to synthesis at all.

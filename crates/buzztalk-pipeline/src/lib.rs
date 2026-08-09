@@ -52,6 +52,7 @@
 #![warn(missing_docs)]
 
 mod agent;
+mod audio_engine;
 mod capture;
 mod error;
 mod metrics;
@@ -63,7 +64,7 @@ mod tts_worker;
 pub use agent::{AgentBackend, AgentEvent, EchoAgent};
 pub use error::PipelineError;
 pub use metrics::TurnMetrics;
-pub use pipeline::{ConversationPipeline, PipelineConfig, PipelineEvent};
+pub use pipeline::{Capabilities, ConversationPipeline, PipelineConfig, PipelineEvent};
 
 /// Re-exported so a caller building a [`PipelineConfig`] doesn't also need
 /// a direct `buzztalk-audio` dependency just to name its type.

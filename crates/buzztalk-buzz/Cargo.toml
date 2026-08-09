@@ -1,0 +1,22 @@
+[package]
+name = "buzztalk-buzz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AgentBackend implementation that speaks to a real Buzz relay over Nostr"
+
+[dependencies]
+buzztalk-core.workspace = true
+buzztalk-session.workspace = true
+buzztalk-pipeline.workspace = true
+thiserror.workspace = true
+nostr = { version = "0.45", default-features = false, features = ["std", "os-rng"] }
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.9"
+
+[[bin]]
+name = "buzztalkd"
+path = "src/bin/buzztalkd.rs"

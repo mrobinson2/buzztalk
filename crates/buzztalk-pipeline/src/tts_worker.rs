@@ -37,6 +37,21 @@ pub(crate) struct TtsResult {
     pub(crate) samples_48k: Vec<f32>,
 }
 
+/// Outcome of [`TtsWorker::poll`]. See `stt_worker::WorkerPoll`, which this
+/// mirrors -- one worker-poll vocabulary shared by both engines' callers in
+/// `pipeline.rs`.
+pub(crate) enum WorkerPoll<T> {
+    /// Nothing new yet; the worker thread is still alive.
+    Empty,
+    /// A result arrived.
+    Result(T),
+    /// The worker thread is gone -- its result channel disconnected, which
+    /// only happens when the thread itself has ended (e.g. it panicked
+    /// synthesizing a phrase). No more results will ever arrive; the caller
+    /// should treat this engine as lost, not retry.
+    Disconnected,
+}
+
 /// A running TTS worker: the synthesizer lives entirely on its own thread.
 pub(crate) struct TtsWorker {
     // `Option` so `Drop` can explicitly close the channel before joining --
@@ -113,9 +128,15 @@ impl TtsWorker {
         }
     }
 
-    /// Non-blocking pop of the next available synthesized chunk.
-    pub(crate) fn try_recv_result(&self) -> Option<TtsResult> {
-        self.result_rx.try_recv().ok()
+    /// Non-blocking poll for the next available synthesized chunk,
+    /// distinguishing "nothing new yet" from "the worker thread is gone" --
+    /// see `stt_worker::SttWorker::poll`, which this mirrors.
+    pub(crate) fn poll(&self) -> WorkerPoll<TtsResult> {
+        match self.result_rx.try_recv() {
+            Ok(result) => WorkerPoll::Result(result),
+            Err(mpsc::TryRecvError::Empty) => WorkerPoll::Empty,
+            Err(mpsc::TryRecvError::Disconnected) => WorkerPoll::Disconnected,
+        }
     }
 }
 
@@ -176,8 +197,10 @@ mod tests {
     fn recv_within(worker: &TtsWorker, timeout: Duration) -> Option<TtsResult> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if let Some(r) = worker.try_recv_result() {
-                return Some(r);
+            match worker.poll() {
+                WorkerPoll::Result(r) => return Some(r),
+                WorkerPoll::Empty => {}
+                WorkerPoll::Disconnected => return None,
             }
             thread::sleep(Duration::from_millis(2));
         }
@@ -242,5 +265,41 @@ mod tests {
         // All three should have arrived (submission order is preserved by
         // the single-threaded worker processing one request at a time).
         assert_eq!(chunk_indices, vec![8, 8, 8]);
+    }
+
+    /// A synthesizer that panics on every call -- standing in for a real
+    /// synthesis failure severe enough to take the worker thread down (as
+    /// opposed to the ordinary `Err` case, which the worker already treats
+    /// as "drop this one item" -- see the `let Ok(...) else { continue }`
+    /// in `spawn_with`'s request loop).
+    struct PanickingSynthesizer;
+    impl SpeechSynthesizer for PanickingSynthesizer {
+        fn synthesize(&mut self, _text: &str) -> TtsResultT<AudioChunk> {
+            panic!("synthesizer fell over");
+        }
+        fn warmup(&mut self) -> TtsResultT<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_panicking_worker_thread_is_observable_as_disconnected_not_a_hang() {
+        let worker = TtsWorker::spawn_with(PanickingSynthesizer);
+        let turn = turns(1)[0];
+        worker.synthesize(turn, "this will panic".into());
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut saw_disconnect = false;
+        while Instant::now() < deadline {
+            if matches!(worker.poll(), WorkerPoll::Disconnected) {
+                saw_disconnect = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            saw_disconnect,
+            "a dead worker thread must be observable as Disconnected, not silence forever"
+        );
     }
 }

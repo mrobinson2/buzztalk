@@ -44,6 +44,19 @@ pub(crate) enum SttResult {
     Final { turn: TurnId, text: String },
 }
 
+/// Outcome of [`SttWorker::poll`].
+pub(crate) enum WorkerPoll<T> {
+    /// Nothing new yet; the worker thread is still alive.
+    Empty,
+    /// A result arrived.
+    Result(T),
+    /// The worker thread is gone -- its result channel disconnected, which
+    /// only happens when the thread itself has ended (e.g. it panicked
+    /// decoding a bad frame). No more results will ever arrive; the caller
+    /// should treat this engine as lost, not retry.
+    Disconnected,
+}
+
 /// A running STT worker: the recognizer lives entirely on its own thread.
 pub(crate) struct SttWorker {
     // `Option` so `Drop` can explicitly close the channel (drop the sender)
@@ -154,9 +167,17 @@ impl SttWorker {
         }
     }
 
-    /// Non-blocking pop of the next available result.
-    pub(crate) fn try_recv_result(&self) -> Option<SttResult> {
-        self.result_rx.try_recv().ok()
+    /// Non-blocking poll for the next available result, distinguishing
+    /// "nothing new yet" from "the worker thread is gone" -- the caller
+    /// must react to the latter by treating STT as lost (see
+    /// [`WorkerPoll::Disconnected`]), not by looping forever waiting for a
+    /// result that can never arrive.
+    pub(crate) fn poll(&self) -> WorkerPoll<SttResult> {
+        match self.result_rx.try_recv() {
+            Ok(result) => WorkerPoll::Result(result),
+            Err(mpsc::TryRecvError::Empty) => WorkerPoll::Empty,
+            Err(mpsc::TryRecvError::Disconnected) => WorkerPoll::Disconnected,
+        }
     }
 
     /// Total audio pushes dropped so far because the worker's queue was
@@ -230,8 +251,10 @@ mod tests {
     fn recv_within(worker: &SttWorker, timeout: Duration) -> Option<SttResult> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if let Some(r) = worker.try_recv_result() {
-                return Some(r);
+            match worker.poll() {
+                WorkerPoll::Result(r) => return Some(r),
+                WorkerPoll::Empty => {}
+                WorkerPoll::Disconnected => return None,
             }
             thread::sleep(Duration::from_millis(2));
         }
@@ -328,5 +351,42 @@ mod tests {
         // the worker thread, which won't happen until every buffered
         // request has been drained.
         released.store(true, Ordering::Relaxed);
+    }
+
+    /// A recognizer that panics the first time it's asked to push audio --
+    /// standing in for a real decode failure severe enough to take the
+    /// worker thread down (as opposed to the ordinary `Err` case, which the
+    /// worker already treats as "no result this call" and keeps going --
+    /// see the `Ok(...)`-only match in `spawn_with`'s request loop).
+    struct PanickingRecognizer;
+    impl SpeechRecognizer for PanickingRecognizer {
+        fn push_audio(&mut self, _samples: &[f32]) -> CoreResult<Option<Transcript>> {
+            panic!("recognizer fell over");
+        }
+        fn finish_utterance(&mut self) -> CoreResult<Option<Transcript>> {
+            Ok(None)
+        }
+        fn reset(&mut self) {}
+    }
+
+    #[test]
+    fn a_panicking_worker_thread_is_observable_as_disconnected_not_a_hang() {
+        let worker = SttWorker::spawn_with(PanickingRecognizer);
+        let turn = a_turn();
+        worker.push_audio(turn, vec![0.1; 10]);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut saw_disconnect = false;
+        while Instant::now() < deadline {
+            if matches!(worker.poll(), WorkerPoll::Disconnected) {
+                saw_disconnect = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            saw_disconnect,
+            "a dead worker thread must be observable as Disconnected, not silence forever"
+        );
     }
 }

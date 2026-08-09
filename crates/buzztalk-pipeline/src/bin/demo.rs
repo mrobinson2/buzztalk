@@ -3,12 +3,18 @@
 //! the session machine, [`EchoAgent`], TTS, and playback, with barge-in.
 //!
 //! ```text
-//! buzztalk-demo [--headphones] [--simulate [PATH]] [--seconds N]
+//! buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]
 //! ```
 //!
 //! * `--headphones` forces the barge-in gate to treat output as
 //!   `OutputRoute::Headphones` (no acoustic loop, ERLE gate relaxed) --
 //!   useful on a machine whose real output route can't be detected.
+//! * `--no-aec` runs with the null echo canceller instead of the best
+//!   compiled-in backend -- for telling whether AEC itself is why barge-in
+//!   isn't working. See the loud warning this prints at startup: with no
+//!   real echo suppression to measure, the barge-in gate has nothing to
+//!   check before trusting a candidate, so it becomes far more
+//!   trigger-happy on ordinary playback bleed.
 //! * `--simulate [PATH]` replaces live microphone capture with audio
 //!   decoded from a WAV file, paced to real time as if it were the
 //!   microphone. Defaults to the Parakeet test fixture shipped with the
@@ -18,6 +24,13 @@
 //!   microphone here.
 //! * `--seconds N` (default 30) is how long the demo runs before ending
 //!   the session and exiting.
+//!
+//! Per the project's design rule ("every failure degrades to something
+//! usable"), a missing STT or TTS model does not stop this demo from
+//! starting -- it prints the pipeline's capability report right after
+//! startup so a half-finished model download shows up as "degraded but
+//! working," not as a silent dead feature. Only a real fatal error (no
+//! audio device, or a bad `--simulate` WAV) exits non-zero.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -28,6 +41,7 @@ use buzztalk_pipeline::{
 
 fn main() {
     let mut headphones = false;
+    let mut no_aec = false;
     let mut simulate: Option<PathBuf> = None;
     let mut seconds: u64 = 30;
 
@@ -35,6 +49,7 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--headphones" => headphones = true,
+            "--no-aec" => no_aec = true,
             "--simulate" => {
                 let path = match args.peek() {
                     Some(p) if !p.starts_with("--") => PathBuf::from(args.next().unwrap()),
@@ -68,12 +83,23 @@ fn main() {
     if headphones {
         println!("  --headphones: forcing output route to headphones");
     }
+    if no_aec {
+        println!(
+            "  --no-aec: running with NO echo cancellation (null canceller). \
+             BARGE-IN WILL BE UNRELIABLE in this mode -- with no real echo \
+             suppression to measure, the barge-in gate has nothing to check \
+             before trusting a candidate, so ordinary playback bleed can \
+             falsely trigger it. Use this only to test whether AEC itself \
+             is the thing breaking your setup, not for normal use."
+        );
+    }
     println!();
 
     let config = PipelineConfig {
         forced_output_route: headphones.then_some(OutputRoute::Headphones),
         simulate_capture: simulate,
         agent: Box::new(EchoAgent::new()),
+        no_aec,
         ..Default::default()
     };
 
@@ -85,12 +111,25 @@ fn main() {
         }
     };
 
+    // Every failure degrades to something usable: STT/TTS each loading is
+    // best-effort, not fatal to `start` -- print what we actually got
+    // before pumping events, so a missing model is visibly "degraded but
+    // running," not silence.
+    println!("capabilities: {}", pipeline.capabilities().report());
+    println!();
+
     pipeline.start_session();
 
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let mut last_partial = String::new();
     while Instant::now() < deadline {
         match pipeline.recv_event_timeout(Duration::from_millis(200)) {
+            Some(PipelineEvent::Capabilities(caps)) => {
+                println!("[caps]    {}", caps.report())
+            }
+            Some(PipelineEvent::CapabilityLost { what, reason }) => {
+                println!("[lost]    {what}: {reason}")
+            }
             Some(PipelineEvent::StateChanged(state)) => println!("[state]   {state:?}"),
             Some(PipelineEvent::Partial(text)) => {
                 if text != last_partial {
@@ -121,6 +160,9 @@ fn main() {
         match pipeline.recv_event_timeout(Duration::from_millis(100)) {
             Some(PipelineEvent::TurnMetrics(summary)) => println!("[metrics] {summary}"),
             Some(PipelineEvent::StateChanged(state)) => println!("[state]   {state:?}"),
+            Some(PipelineEvent::CapabilityLost { what, reason }) => {
+                println!("[lost]    {what}: {reason}")
+            }
             Some(PipelineEvent::SessionEnded) => {
                 println!("[state]   session ended");
                 break;
@@ -131,5 +173,5 @@ fn main() {
 }
 
 fn print_usage() {
-    println!("usage: buzztalk-demo [--headphones] [--simulate [PATH]] [--seconds N]");
+    println!("usage: buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]");
 }
