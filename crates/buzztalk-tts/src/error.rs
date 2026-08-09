@@ -60,13 +60,12 @@ pub enum Error {
     Tokenizer(String),
 
     /// The reference voice WAV could not be read.
-    #[error("could not read reference voice WAV at {path}: {source}")]
+    #[error("could not read reference voice WAV at {path}: {reason}")]
     Wav {
         /// Path to the WAV file.
         path: PathBuf,
-        /// Underlying `hound` error.
-        #[source]
-        source: hound::Error,
+        /// Human-readable reason it was rejected.
+        reason: String,
     },
 
     /// The reference voice audio was empty or unusable.

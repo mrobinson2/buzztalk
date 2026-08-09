@@ -380,6 +380,19 @@ impl Orchestrator {
                 self.metrics = TurnMetrics::new();
             }
             SessionState::UserSpeaking => {
+                // A turn also ends by being interrupted, not only by returning
+                // to Listening. Flushing metrics solely on the Listening
+                // transition loses them for exactly the turns we most want to
+                // measure: in continuous conversation the machine goes
+                // Interrupting -> UserSpeaking directly, so every barge-in
+                // latency — the number this product is judged on — was
+                // discarded at the moment it finally became available.
+                if self.metrics.has_any() {
+                    let _ = self
+                        .events_tx
+                        .send(PipelineEvent::TurnMetrics(self.metrics.summary()));
+                    self.metrics = TurnMetrics::new();
+                }
                 if self.stt_active_turn.is_none() {
                     if let Some(turn) = self.session.current_turn() {
                         self.resampler_16k.reset();

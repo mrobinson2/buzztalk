@@ -9,14 +9,38 @@ description = "Streaming text-to-speech for BuzzTalk via Kyutai Pocket TTS"
 [dependencies]
 buzztalk-core.workspace = true
 thiserror.workspace = true
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["ndarray", "std", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
+# `disable-linking` + `api-24` mirrors buzz-voice's production Cargo.toml:
+# `ort` brings no ONNX Runtime of its own and instead binds to whatever
+# already-linked runtime is in the final binary, at API version 24.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["api-24", "ndarray", "std"] }
+ort-sys = { version = "=2.0.0-rc.12", features = ["disable-linking"] }
+# NOT used for its TTS API — its `OfflineTtsPocketModelConfig` cannot load
+# this bundle (see the "Why not sherpa-onnx" section in lib.rs). It IS used
+# for `Wave`/`LinearResampler` (see src/wav.rs), which is both faithful to
+# buzz-voice's own dependency choice AND load-bearing: a dependency Cargo
+# can see is never actually called gets its native-link directives dropped
+# from the final binary by the linker, which defeats the whole point below.
+# The actual purpose of this dependency is to statically link the ONNX
+# Runtime that `ort` above (built with `disable-linking`) then binds its
+# symbols against. `buzztalk-stt` also depends on sherpa-onnx for its own,
+# unrelated STT model, and the two crates get linked into the same binary
+# downstream (buzztalk-pipeline); without this, `ort` would download and
+# statically link a SECOND, different ONNX Runtime into that binary, and
+# the two runtimes colliding at the symbol level segfaults on construction
+# in either crate's init order. DO NOT remove this as "unused" — see
+# crates/buzztalk-tts/tests/coexists_with_buzztalk_stt.rs for the
+# regression test this prevents.
+sherpa-onnx = "1.13"
 rand = "0.10"
 sentencepiece-model = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
-hound = "3"
 
 [dev-dependencies]
 tempfile = "3"
+buzztalk-stt.workspace = true
+# Only used to write the debug WAV in tests/model_synthesis.rs; production
+# code reads/writes voice audio through sherpa_onnx::Wave (see src/wav.rs).
+hound = "3"
 

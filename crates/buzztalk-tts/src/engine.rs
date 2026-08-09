@@ -309,7 +309,7 @@ impl PocketEngine {
                 &style.samples,
                 style.sample_rate,
                 self.bundle.sample_rate as u32,
-            )
+            )?
         };
         let audio = Tensor::from_array((
             vec![1_i64, 1, samples.len() as i64],
