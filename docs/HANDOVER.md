@@ -82,10 +82,15 @@ All measured on real hardware against the user's real hosted community
 ## Open work (backlog, roughly prioritized)
 
 **Voice-polish bugs found live:**
-1. **TTS output front-clipping** (NEW, unfixed) — the *start* of spoken
-   agent replies gets cut. Playback-side mirror of the mic front-clip.
-   Investigate output-stream warmup / first-playback-chunk / barge-in
-   reset in the VPIO + `playback.rs` path. User hit this repeatedly.
+1. **TTS output front-clipping** (FIX SHIPPED `0fd7828`, awaiting
+   live-ear confirmation) — the *start* of spoken agent replies got cut.
+   Root cause: playback underruns filled the device with exact digital
+   zeros, letting downstream gates close (VPIO far-end processing, BT
+   sink power-save mute); the gate re-opening swallowed speech onset.
+   Fixed by ~-66 dBFS comfort-noise underrun fill in
+   `next_playback_sample` (shared: cpal + VPIO + iOS). Daemon restarted
+   on the fixed binary 2026-08-09 evening. Confirm on the BT headset,
+   then close.
 2. **Mic front-clip after silence** — first word after a quiet gap clips;
    partly mitigated (preroll 1500 ms) but the deep case is the device wake.
 3. **Streaming agent replies** — replies arrive as one whole message then
