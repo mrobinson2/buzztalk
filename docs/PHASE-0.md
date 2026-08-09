@@ -272,5 +272,52 @@ and the message was read back off the relay with `buzz messages get`:
 Audio in, signed `kind:9` event out, correct `h` and `p` tags, persisted in a real
 relay and retrievable by Buzz's own tooling. Voice-to-Buzz is verified end to end.
 
-Still unproven: a real agent reply spoken back, which needs a live `buzz-acp` agent
-attached to the channel; and the acoustic path, which needs physical hardware.
+## Closed-loop validation: first real agent reply (2026-08-09)
+
+The full conversation loop was closed against a live agent for the first time.
+Setup: the same local `buzz-relay` (0.2.1), a fresh private channel
+(`ef319be4-4b42-44b2-a7b5-d379f03149b3`), and upstream's `buzz-acp` harness running
+**Claude (via `claude-agent-acp` 0.66.0)** as a channel member, `--respond-to anyone`,
+with a voice-register system prompt (one or two short sentences, no markdown).
+
+`buzztalkd` ran with `--simulate` feeding the Parakeet fixture as microphone input:
+
+```
+[final]   Well, I don't wish to see it any more, observed Phoebe
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   That sounds like Hawthorne, Phoebe from The House of the Seven Gables. Is there something you'd like me to do with it?
+[state]   AgentSpeaking
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 202.8 ms   barge-in -> playback silent: n/a
+```
+
+Speech in, kind:9 published with `h`/`p` tags, a real LLM agent replied over the relay,
+the reply passed eligibility, was attributed to the turn, and was synthesized and played
+(`AgentSpeaking` → `Listening`). Both directions read back with `buzz messages get`.
+Full log: `docs/closed-loop-run-2026-08-09.log`.
+
+One integration wrinkle worth recording: `claude-agent-acp` runs Claude Code in
+`dontAsk` permission mode, which silently rejects the `buzz messages send` Bash call
+the harness prompt asks the agent to make. The fix is a `.claude/settings.local.json`
+in the harness working directory allowlisting `Bash(buzz messages send:*)` (and the
+read-only `buzz messages get/thread` variants). Without it the agent completes its
+turn "ok" having replied only into the void.
+
+## Live hardware session (2026-08-09, same day): barge-in against a live agent
+
+Hours later the loop ran with a human on real hardware — Sony WH-CH720N
+Bluetooth headset, real microphone, live spoken conversation. **Eight
+barge-ins against the live agent's reply, 19.5–43.0 ms from voice detected
+to playback silent.** Multi-turn conversation, verbatim recall by voice,
+and the agent live-diagnosing its own input clipping. Full report, raw
+logs, bug list (including the open Bluetooth sample-rate renegotiation
+issue), and tuning changes: [`docs/live-session-2026-08-09/SESSION-REPORT.md`](live-session-2026-08-09/SESSION-REPORT.md).
+
+Same day, afternoon: **loudspeaker barge-in proven** — three deliberate
+interrupts through a live open-air echo path (agent on real speakers, AEC
+active) at 7.2 / 33.1 / 39.6 ms, plus a self-healing audio engine that
+rebuilds on device changes. Remaining: the quantitative acoustic ERLE
+bench number, and the VoiceProcessingIO engine path for full-duplex on
+Bluetooth. Full record:
+[`docs/live-session-2026-08-09/SESSION-REPORT.md`](live-session-2026-08-09/SESSION-REPORT.md).

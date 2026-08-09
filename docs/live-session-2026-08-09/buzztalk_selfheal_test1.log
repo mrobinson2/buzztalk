@@ -1,0 +1,52 @@
+buzztalkd starting
+  relay:   ws://localhost:3000
+  channel: ef319be4-4b42-44b2-a7b5-d379f03149b3
+  --headphones: forcing output route to headphones
+
+buzztalk-buzz: connected to ws://localhost:3000
+buzztalk-buzz: authenticated as 5c8498693d454579ccd7fc9af8c2fb41607d1d742e6bc5a2d3e77e197e4d2e74
+capabilities: full duplex: your voice will be transcribed and the agent's replies will be spoken
+
+[caps]    full duplex: your voice will be transcribed and the agent's replies will be spoken
+[state]   Listening
+[state]   UserSpeaking
+[partial] .
+[partial] 
+[partial] .
+[partial] 
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[audio]   engine rebuilt: default device changed (in:WH-CH720N@16000|out:Mac mini Speakers@48000)
+[state]   Idle
+[state]   idle timeout -- restarting session
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 232.5 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+buzztalk-audio: output stream error: default output device changed
+[audio]   engine rebuilt: default device changed (in:WH-CH720N@16000|out:WH-CH720N@16000)
+[state]   Idle
+[state]   idle timeout -- restarting session
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 167.7 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 269.6 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty

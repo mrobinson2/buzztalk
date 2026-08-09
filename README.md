@@ -28,11 +28,32 @@ Speech runs locally on your machine.
 published a signed `kind:9` event with the correct `h` and `p` tags, and the message was
 read back using Buzz's own CLI.
 
-**Not yet proven:** every echo-cancellation number above is synthetic. The development
-machine is a remotely-accessed Mac mini whose default audio device is a virtual driver, so
-it has no acoustic loop and cannot validate the thing that matters most — a real microphone
-hearing a real speaker in a real room. **Barge-in over loudspeakers is unverified.** See
-[`docs/PHASE-0.md`](docs/PHASE-0.md) for the full measurement record.
+**The conversation loop is closed and used live (2026-08-09).** A live Claude agent —
+upstream's `buzz-acp` harness running `claude-agent-acp` — replied to transcribed speech
+over the relay, and `buzztalkd` spoke the reply aloud: speech in, `kind:9` out, real LLM
+reply back, eligibility-checked, turn-attributed, synthesized, played. The same day, a
+human on a real microphone held a multi-turn spoken conversation with the agent and
+**interrupted it mid-sentence eight times, 19.5–43 ms from voice to silence** (Bluetooth
+headset; the synthetic figure is 7–15 ms, cloud assistants sit near 700 ms). See
+[`docs/PHASE-0.md`](docs/PHASE-0.md) and
+[`docs/live-session-2026-08-09/SESSION-REPORT.md`](docs/live-session-2026-08-09/SESSION-REPORT.md).
+
+**Loudspeaker barge-in: proven (2026-08-09, same day).** With the agent speaking from
+real loudspeakers into an open room and echo cancellation live, the speaker deliberately
+interrupted it mid-sentence three times: **7.2 / 33.1 / 39.6 ms** from voice to silence,
+with no false self-interruptions. The barge-in gate only opens on evidence of real echo
+suppression, so these firings double as proof the canceller worked against a live
+acoustic echo. The engine also now **self-heals device changes**: stream errors,
+default-device or sample-rate flips (Bluetooth renegotiation), and capture stalls trigger
+an in-place rebuild within about a second — a headset power-cycle mid-conversation now
+heals automatically.
+
+**Still open:** the quantitative acoustic ERLE measurement (the 36.6 dB figure is still
+synthetic; the functional claim is not), and the top engine item for wireless-first use —
+a VoiceProcessingIO-based path so Bluetooth headsets can carry *both* directions (today,
+duplex-on-BT starves the headset mic; the interim answer is BT mic in, speakers out). See
+[`docs/PHASE-0.md`](docs/PHASE-0.md) and
+[`docs/live-session-2026-08-09/SESSION-REPORT.md`](docs/live-session-2026-08-09/SESSION-REPORT.md).
 
 ---
 

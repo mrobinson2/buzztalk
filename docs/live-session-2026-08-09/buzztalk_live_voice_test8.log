@@ -1,0 +1,190 @@
+buzztalkd starting
+  relay:   ws://localhost:3000
+  channel: ef319be4-4b42-44b2-a7b5-d379f03149b3
+  --headphones: forcing output route to headphones
+
+buzztalk-buzz: connected to ws://localhost:3000
+buzztalk-buzz: authenticated as 5c8498693d454579ccd7fc9af8c2fb41607d1d742e6bc5a2d3e77e197e4d2e74
+capabilities: full duplex: your voice will be transcribed and the agent's replies will be spoken
+
+[caps]    full duplex: your voice will be transcribed and the agent's replies will be spoken
+[state]   Listening
+[state]   UserSpeaking
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 37.3 ms   barge-in -> playback silent: n/a
+[state]   Idle
+[state]   idle timeout -- restarting session
+[state]   Listening
+[state]   UserSpeaking
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 61.7 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] Thank.
+[partial] ' downlad.
+[partial] Hold down let me you.
+[partial] Hold on let me check.
+[state]   Finalizing
+[final]   Hold on, let me check
+[state]   AwaitingAgent
+[state]   Submitting
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 137.0 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] 
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 72.0 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] They
+[partial] Yeah, m.
+[partial] Yeah, my app is
+[partial] Yeah, my app is d.
+[partial] Yeah, my app is definitely.
+[partial] Yeah, my app is definitely c.
+[partial] Yeah, my app is definitely connected.
+[partial] Yeah, my app is definitely connected to
+[partial] Yeah, my app is definitely connected to the
+[state]   Finalizing
+[final]   Yeah, my app is definitely connected to the
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   Cut off at the end again, I got yeah, my app is definitely connected to the, and then nothing. Connected to what?
+[state]   AgentSpeaking
+[state]   Interrupting
+[partial] Cck country
+[state]   UserSpeaking
+[metrics] end-of-speech -> final transcript: 175.4 ms   barge-in -> playback silent: 20.5 ms
+[partial] Cat conversation
+[partial] chat conversation
+[state]   Finalizing
+[final]   chat conversation
+[state]   AwaitingAgent
+[state]   Submitting
+[drop]    synthesized audio for an abandoned/unrecognised turn: 1 total
+[drop]    synthesized audio for an abandoned/unrecognised turn: 2 total
+[drop]    synthesized audio for an abandoned/unrecognised turn: 3 total
+[agent]   The rest arrived, chat conversation came in as its own message six seconds later. So pauses aren't losing words, they're splitting one sentence into two messages, and I reply before the second half lands.
+[state]   AgentSpeaking
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 80.8 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] .
+[partial] see that.
+[partial] see that why.
+[partial] I see that. whyy is that?
+[partial] I see that. Why is that happening?
+[state]   Finalizing
+[final]   I see that. Why is that happening
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   The app's voice detection treats a short silence as you being done, so it finalizes and sends what it has, and your pause is longer than that cutoff. The fix is raising the end-of-speech silence threshold in the app so it waits longer before sending.
+[state]   AgentSpeaking
+[state]   Interrupting
+[partial] 
+[state]   UserSpeaking
+[metrics] end-of-speech -> final transcript: 93.4 ms   barge-in -> playback silent: 38.9 ms
+[partial] Aa
+[partial] Ma
+[partial] 
+[partial] Is that a setting that
+[partial] Is that a setting that I can change?
+[partial] Is that a setting that I can change in my
+[partial] Is that a setting that I can change in my profile?
+[partial] Is that a setting that I can change in my profile??
+[partial] Is that a setting that I can change in my profile, the end of speech time?
+[partial] Is that a setting that I can change in my profile, the end of speech and also
+[partial] Is that a setting that I can change in my profile the end of speech? and also why does it s?
+[partial] Is that a setting that I can change in my profile, the end of speech? And also why does it seem like
+[partial] Is that a setting that I can change in my profile, the end of speech? and also why does it seem like there's a
+[partial] Is that a setting that I can change in my profile, the end of speech? And also why does it seem like there's a lag where?
+[partial] Is that a setting that I can change in my profile the end of speech? And also why does it seem like there's a lag where?
+[partial] Is that a setting that I can change in my profile, the end of speech? And also why does it seem like there's a lag where the
+[partial] Is that a setting that I can change in my profile, the end of speech? And also, why does it seem like there's a lag where the minute I say
+[partial] that I can change in my profile, the end of speech. And also why does it seem like there's a lag where if the minute I start talking
+[partial] I can change in my profile, the end of speech. And also why does it seem like there's a lag where the minute I start talking
+[partial] in my profile, the end of speech. And also why does it seem like there's a lag where the minute I start talking, it may
+[partial] profile the end of speech. and also why does it seem like there's a lag where the minute I start talking, it might be through
+[partial] the end of speech. And also why does it seem like there's a lag where if the minute I start talking, it might be three to fives.
+[partial] speech And also why does it seem like there's a lag where the minute I start talking, it might be three to five seconds
+[partial] And alsoso, why does it seem like there's a lag where the minute I start talking, it might be three to five seconds into my talk.
+[partial] Why does it seem like there's a lag where the minute I start talking, it might be three to five seconds into my talking before
+[partial] seem like there's a lag where the minute I start talking, it might be three to five seconds into my talking before
+[partial] There's a lag where the minute I start talking, it might be three to five seconds into my talking before it begins.
+[partial] lag where the minute I start talking, it might be three to five seconds into my talking before it begins
+[partial] where the minute I start talking, it might be three to five seconds into my talking before it begins listen.
+[state]   Finalizing
+[final]   the minute I start talking, it might be three to five seconds into my talking before it begins listening.
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   That fits the front clipping, the mic or the recognizer is spinning up lazily when you start talking, and everything before it's ready is lost. Fix is to keep the audio session warm, or buffer audio from the moment the mic opens so no opening words get dropped.
+[state]   AgentSpeaking
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 656.1 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] 
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 43.7 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] me
+[partial] me?
+[state]   Finalizing
+[final]   S me
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   That one arrived as just S me, two characters, so almost the whole thing got clipped. Say it again and I'll catch it.
+[state]   AgentSpeaking
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 49.9 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] can
+[partial] Can you hear?
+[partial] Can you hear me?
+[state]   Finalizing
+[final]   Can you hear me
+[state]   AwaitingAgent
+[state]   Submitting
+[agent]   Yes, loud and clear that time, can you hear me came through complete.
+[state]   AgentSpeaking
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 73.8 ms   barge-in -> playback silent: n/a
+[state]   UserSpeaking
+[partial] 
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 49.2 ms   barge-in -> playback silent: n/a
+[state]   Idle
+[state]   idle timeout -- restarting session
+[state]   Listening
+[state]   UserSpeaking
+[partial] .
+[partial] 
+[state]   Finalizing
+[final]   
+[state]   AwaitingAgent
+[state]   Submitting
+buzztalk-buzz: refusing to publish turn submission: cannot build turn submission event: content must not be empty
+[state]   Listening
+[metrics] end-of-speech -> final transcript: 61.5 ms   barge-in -> playback silent: n/a
