@@ -257,5 +257,20 @@ Proven end to end against a real server:
   continues, and shutdown is orderly. The failure path is now measured rather than
   assumed.
 
-Still unproven: a *successful* publish and a real agent reply, both of which require
-channel membership that a freshly generated keypair does not have.
+Then, with a channel created via Buzz's own CLI using the same identity, the full
+path was proven. `buzztalkd` transcribed simulated microphone audio and published it,
+and the message was read back off the relay with `buzz messages get`:
+
+```json
+{"content":"Well, I don't wish to see it any more, observed Phoebe",
+ "kind":9,
+ "pubkey":"55d5355909c6dfa2d953e8bb937ed3f2310a7a70bb145e87e8b1461f7dfd280b",
+ "tags":[["h","9fceb0cd-974d-4ed6-8621-7b4350682d8f"],
+         ["p","70541d2c65d9f1e97c308ec9867417f9a031cc5d8e9dab3ec12692d98a0734d3"]]}
+```
+
+Audio in, signed `kind:9` event out, correct `h` and `p` tags, persisted in a real
+relay and retrievable by Buzz's own tooling. Voice-to-Buzz is verified end to end.
+
+Still unproven: a real agent reply spoken back, which needs a live `buzz-acp` agent
+attached to the channel; and the acoustic path, which needs physical hardware.
