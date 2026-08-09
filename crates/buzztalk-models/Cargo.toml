@@ -1,0 +1,19 @@
+[package]
+name = "buzztalk-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Downloads and verifies the STT/TTS model bundles BuzzTalk needs, with pinned SHA-256 checksums and atomic installs"
+
+[dependencies]
+thiserror.workspace = true
+sha2 = "0.10"
+ureq = "2"
+tar = "0.4"
+bzip2 = "0.4"
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"

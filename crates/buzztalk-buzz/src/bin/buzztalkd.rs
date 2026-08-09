@@ -11,6 +11,8 @@
 //!           [--key-env VAR | --key-file PATH]
 //!           [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]
 //!           [--quiet-period-ms N]
+//! buzztalkd --download-models
+//! buzztalkd --model-status
 //! ```
 //!
 //! `--headphones`, `--no-aec`, `--simulate [PATH]`, and `--seconds N` mirror
@@ -21,6 +23,11 @@
 //! ("every failure degrades to something usable"), a missing STT or TTS
 //! model does not stop `buzztalkd` from starting -- it prints the
 //! pipeline's capability report right after startup, same as the demo.
+//!
+//! `--download-models` and `--model-status` also mirror the demo exactly
+//! (both delegate to `buzztalk-models`): checked before `--relay`/
+//! `--channel`/`--agent-pubkey` are required, so `buzztalkd --model-status`
+//! works standalone without a relay configured.
 //!
 //! The signing key is never accepted as a flag (it would end up in argv and
 //! shell history). If neither `--key-env` nor `--key-file` is given,
@@ -144,13 +151,35 @@ fn print_usage() {
          \x20         --agent-pubkey <hex-or-npub> [--agent-pubkey ...] \\\n\
          \x20         [--key-env VAR | --key-file PATH] \\\n\
          \x20         [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N] \\\n\
-         \x20         [--quiet-period-ms N]\n\n\
+         \x20         [--quiet-period-ms N]\n\
+         \x20      buzztalkd --download-models\n\
+         \x20      buzztalkd --model-status\n\n\
          The signing key defaults to the BUZZTALK_NOSTR_SECRET environment variable\n\
          when neither --key-env nor --key-file is given."
     );
 }
 
 fn main() {
+    // Checked ahead of `Args::parse` (and its `--relay`/`--channel`/
+    // `--agent-pubkey` requirements) so these two work standalone --
+    // fetching or inspecting models has nothing to do with having a relay
+    // configured yet.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.iter().any(|a| a == "--model-status") {
+        print!("{}", buzztalk_models::status());
+        return;
+    }
+    if raw_args.iter().any(|a| a == "--download-models") {
+        match buzztalk_models::ensure_models(buzztalk_models::ModelSet::All) {
+            Ok(()) => println!("buzztalkd: model download complete."),
+            Err(err) => {
+                eprintln!("buzztalkd: model download failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let args = match Args::parse(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(e) => {
@@ -223,6 +252,12 @@ fn main() {
     // before pumping events, so a missing model is visibly "degraded but
     // running," not silence (same rule `buzztalk-demo` follows).
     println!("capabilities: {}", pipeline.capabilities().report());
+    if !pipeline.capabilities().stt || !pipeline.capabilities().tts {
+        println!(
+            "  hint: missing speech models? run `buzztalkd --download-models` to fetch \
+             them (or `buzztalkd --model-status` to see what's there)."
+        );
+    }
     println!();
 
     pipeline.start_session();

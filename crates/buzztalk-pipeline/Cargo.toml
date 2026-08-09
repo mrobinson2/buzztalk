@@ -14,6 +14,9 @@ buzztalk-vad.workspace = true
 buzztalk-stt.workspace = true
 buzztalk-tts.workspace = true
 buzztalk-session.workspace = true
+# Only used by the `buzztalk-demo` bin, for its `--download-models` /
+# `--model-status` flags -- not by the library crate itself.
+buzztalk-models.workspace = true
 thiserror.workspace = true
 hound = "3"
 

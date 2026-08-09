@@ -4,8 +4,18 @@
 //!
 //! ```text
 //! buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]
+//! buzztalk-demo --download-models
+//! buzztalk-demo --model-status
 //! ```
 //!
+//! * `--download-models` fetches and verifies both speech model bundles
+//!   (via `buzztalk-models`) into `~/.buzztalk/models` (or
+//!   `BUZZTALK_MODELS_DIR`), then exits -- this is the fix for "the
+//!   published binary doesn't work on a fresh machine because the models
+//!   have to be `curl`ed by hand." Safe to re-run: already-correct files
+//!   are left alone.
+//! * `--model-status` reports what's present, what's missing, and how much
+//!   disk space the models are using, then exits.
 //! * `--headphones` forces the barge-in gate to treat output as
 //!   `OutputRoute::Headphones` (no acoustic loop, ERLE gate relaxed) --
 //!   useful on a machine whose real output route can't be detected.
@@ -44,6 +54,8 @@ fn main() {
     let mut no_aec = false;
     let mut simulate: Option<PathBuf> = None;
     let mut seconds: u64 = 30;
+    let mut download_models = false;
+    let mut model_status = false;
 
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -60,6 +72,8 @@ fn main() {
             "--seconds" => {
                 seconds = args.next().and_then(|s| s.parse().ok()).unwrap_or(seconds);
             }
+            "--download-models" => download_models = true,
+            "--model-status" => model_status = true,
             "--help" | "-h" => {
                 print_usage();
                 return;
@@ -70,6 +84,23 @@ fn main() {
                 std::process::exit(2);
             }
         }
+    }
+
+    if model_status {
+        print!("{}", buzztalk_models::status());
+        return;
+    }
+    if download_models {
+        match buzztalk_models::ensure_models(buzztalk_models::ModelSet::All) {
+            Ok(()) => {
+                println!("buzztalk-demo: model download complete.");
+            }
+            Err(err) => {
+                eprintln!("buzztalk-demo: model download failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
 
     println!("buzztalk-demo starting");
@@ -116,6 +147,12 @@ fn main() {
     // before pumping events, so a missing model is visibly "degraded but
     // running," not silence.
     println!("capabilities: {}", pipeline.capabilities().report());
+    if !pipeline.capabilities().stt || !pipeline.capabilities().tts {
+        println!(
+            "  hint: missing speech models? run `buzztalk-demo --download-models` to fetch \
+             them (or `buzztalk-demo --model-status` to see what's there)."
+        );
+    }
     println!();
 
     pipeline.start_session();
@@ -173,5 +210,8 @@ fn main() {
 }
 
 fn print_usage() {
-    println!("usage: buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]");
+    println!(
+        "usage: buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]\n\
+         \x20         [--download-models] [--model-status]"
+    );
 }

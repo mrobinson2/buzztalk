@@ -10,6 +10,9 @@ description = "AgentBackend implementation that speaks to a real Buzz relay over
 buzztalk-core.workspace = true
 buzztalk-session.workspace = true
 buzztalk-pipeline.workspace = true
+# Only used by the `buzztalkd` bin, for its `--download-models` /
+# `--model-status` flags -- not by the library crate itself.
+buzztalk-models.workspace = true
 thiserror.workspace = true
 nostr = { version = "0.45", default-features = false, features = ["std", "os-rng"] }
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

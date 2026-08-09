@@ -38,6 +38,7 @@ pub enum ModelError {
 pub fn default_model_dir() -> PathBuf {
     model_dir_from(
         env::var_os("BUZZTALK_MODEL_DIR").map(PathBuf::from),
+        env::var_os("BUZZTALK_MODELS_DIR").map(PathBuf::from),
         env::var_os("HOME").map(PathBuf::from),
     )
 }
@@ -45,9 +46,21 @@ pub fn default_model_dir() -> PathBuf {
 /// Pure resolution logic behind [`default_model_dir`], split out so it is
 /// testable without mutating process-global environment state (`env::set_var`
 /// requires `unsafe` as of recent `std`, and this crate forbids `unsafe`).
-fn model_dir_from(env_override: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+fn model_dir_from(
+    env_override: Option<PathBuf>,
+    models_base: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    // Precedence: the crate-specific override, then the shared models base that
+    // `buzztalk-models` downloads into, then the default under HOME. Honouring
+    // the shared base matters because `--model-status` reports on it: without
+    // this, the status command would confidently describe a directory the
+    // recognizer never looks at.
     if let Some(dir) = env_override {
         return dir;
+    }
+    if let Some(base) = models_base {
+        return base.join("parakeet-tdt-ctc-110m-en");
     }
     let home = home.unwrap_or_else(|| PathBuf::from("."));
     home.join(".buzztalk/models/parakeet-tdt-ctc-110m-en")
@@ -83,14 +96,27 @@ mod tests {
     fn model_dir_honours_env_override() {
         let dir = model_dir_from(
             Some(PathBuf::from("/tmp/some-other-model-dir")),
+            Some(PathBuf::from("/tmp/shared-base")),
             Some(PathBuf::from("/home/someone")),
         );
         assert_eq!(dir, PathBuf::from("/tmp/some-other-model-dir"));
     }
 
     #[test]
+    fn model_dir_uses_the_shared_models_base_when_set() {
+        // The base that `buzztalk-models` downloads into, and that
+        // `--model-status` reports on. If this diverged, the status command
+        // would describe a directory the recognizer never reads.
+        let dir = model_dir_from(None, Some(PathBuf::from("/tmp/shared-base")), None);
+        assert_eq!(
+            dir,
+            PathBuf::from("/tmp/shared-base/parakeet-tdt-ctc-110m-en")
+        );
+    }
+
+    #[test]
     fn model_dir_falls_back_to_home_when_no_override() {
-        let dir = model_dir_from(None, Some(PathBuf::from("/home/someone")));
+        let dir = model_dir_from(None, None, Some(PathBuf::from("/home/someone")));
         assert_eq!(
             dir,
             PathBuf::from("/home/someone/.buzztalk/models/parakeet-tdt-ctc-110m-en")

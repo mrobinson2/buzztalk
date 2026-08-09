@@ -22,6 +22,15 @@ pub fn default_model_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
+    // The shared base that `buzztalk-models` downloads into, and that
+    // `--model-status` reports on. Without honouring it, the status command
+    // would describe a directory the synthesizer never reads — a mismatch that
+    // looks like working software right up until someone relies on it.
+    if let Some(base) = std::env::var_os("BUZZTALK_MODELS_DIR") {
+        if !base.is_empty() {
+            return PathBuf::from(base).join("pocket-tts");
+        }
+    }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
