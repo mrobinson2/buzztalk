@@ -55,3 +55,29 @@ Do not weaken the warnings in the release notes. A failure here is useful inform
 most likely means the room, the speaker volume, or the delay estimate needs work, not that
 the architecture is wrong. Try `--no-aec` on the demo to confirm the rest of the pipeline
 is healthy independent of cancellation.
+
+## The harness has been validated against a machine that should fail
+
+Run on the development Mac mini, whose only audio device is a Jump Desktop virtual driver,
+`hw-validate` fails all five checks and refuses to produce a usable number:
+
+```
+inputs : ["Jump Desktop Microphone", "Jump Desktop Audio"]
+  captured echo   : -120.0 dBFS
+  MEASURED ERLE   : -24.3 dB   (backend self-reports Some(0.176))
+
+  [FAIL] real input device present            every input looks like a virtual driver
+  [FAIL] route detection distinguishes ...    speakers => unknown, headphones => unknown
+  [FAIL] microphone actually hears the speaker  -120.0 dBFS captured while playing
+  [FAIL] real-world ERLE >= 12 dB             -24.3 dB
+  [FAIL] self-reported ERLE tracks measured   reported 0.2, measured -24.3
+
+SOME CHECKS FAILED — do not drop the -alpha suffix
+```
+
+The −24.3 dB figure is meaningless: with no acoustic path, the microphone captures digital
+silence and the "ERLE" is just noise arithmetic. That is precisely why the harness checks
+whether the microphone hears anything *before* reporting cancellation, and fails loudly
+instead of printing a number that looks like a measurement.
+
+A validator that cannot fail proves nothing. This one fails where it should.
