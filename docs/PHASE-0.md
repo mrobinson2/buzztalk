@@ -235,3 +235,27 @@ roughly 20× headroom, which is what the remaining pipeline gets to spend.
 ERLE is reported as `n/a` here rather than a number: this machine's virtual input device
 captures digital silence, so there is no echo to remove. That is the expected result on this
 hardware and it is why the acoustic claims still need a physical Mac.
+
+## Live relay validation (2026-08-09)
+
+`buzztalkd` was run against a real Buzz relay built from upstream source
+(`buzz-relay` 0.2.1, commit f029dea) with Postgres, Redis and MinIO behind it.
+
+```
+buzztalk-buzz: connected to ws://localhost:3000
+buzztalk-buzz: authenticated as 1f15f9aedae71c8945198a0df8894151b720fc9361c482ce386c7994be093f52
+buzztalk-buzz: subscription closed by relay: restricted: not a channel member
+[final]   Well, I don't wish to see it any more, observed Phoebe
+buzztalk-buzz: relay rejected a published event: restricted: not a channel member
+```
+
+Proven end to end against a real server:
+
+- NIP-42 challenge/response authentication succeeds.
+- The relay enforces channel membership on both subscribe and publish.
+- Rejections are surfaced cleanly: no panic, the session stays alive, transcription
+  continues, and shutdown is orderly. The failure path is now measured rather than
+  assumed.
+
+Still unproven: a *successful* publish and a real agent reply, both of which require
+channel membership that a freshly generated keypair does not have.
