@@ -1,0 +1,65 @@
+name: Publish to crates.io
+
+# Manual only. Publishing is irreversible — crates.io does not allow deleting a
+# version, only yanking it — so this never runs automatically on a tag.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (recommended first)"
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux audio dev packages
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Check token is configured
+        env:
+          TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is not set."
+            echo "Create a token at https://crates.io/settings/tokens with the"
+            echo "'publish-new' and 'publish-update' scopes, then add it under"
+            echo "Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      # Order matters: the three dependent crates cannot even be verified until
+      # buzztalk-core exists on the index, because crates.io resolves their
+      # dependency from the registry rather than from the local path.
+      - name: Publish buzztalk-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            cargo publish --dry-run -p buzztalk-core
+          else
+            cargo publish -p buzztalk-core
+            echo "waiting for the index to catch up before publishing dependents"
+            sleep 45
+          fi
+
+      - name: Publish dependents
+        if: ${{ inputs.dry_run == false }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in buzztalk-aec buzztalk-vad buzztalk-audio; do
+            cargo publish -p "$crate"
+            sleep 30
+          done
+
+      - name: Note on dry run
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Dry run only verified buzztalk-core."
+          echo "The other three cannot be dry-run until core is live on the index —"
+          echo "they will fail with 'no matching package named buzztalk-core found'."
+          echo "That is publish ordering, not breakage."
