@@ -18,6 +18,10 @@ buzztalk-aec = { workspace = true, optional = true }
 buzztalk-audio.workspace = true
 
 [[bin]]
+name = "capture-dump"
+path = "src/capture_dump.rs"
+
+[[bin]]
 name = "erle-bench"
 path = "src/erle_bench.rs"
 

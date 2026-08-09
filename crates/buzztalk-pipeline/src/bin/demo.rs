@@ -167,6 +167,9 @@ fn main() {
             Some(PipelineEvent::CapabilityLost { what, reason }) => {
                 println!("[lost]    {what}: {reason}")
             }
+            Some(PipelineEvent::AudioDeviceRebuilt { reason }) => {
+                println!("[audio]   engine rebuilt: {reason}")
+            }
             Some(PipelineEvent::StateChanged(state)) => println!("[state]   {state:?}"),
             Some(PipelineEvent::Partial(text)) => {
                 if text != last_partial {

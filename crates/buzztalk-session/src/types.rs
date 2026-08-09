@@ -56,9 +56,13 @@ pub const FINALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Barge-in confirmation costs real time (the detector needs a run of
 /// frames before it trusts itself), and those ~40 ms are exactly the start
 /// of whatever the user is saying -- often the word that carries the
-/// correction ("**No**, stop..."). 500 ms is generous headroom over that
-/// confirmation cost.
-pub const PREROLL_DURATION: Duration = Duration::from_millis(500);
+/// correction ("**No**, stop..."). 500 ms covered that confirmation cost;
+/// live hardware testing (2026-08-09, Bluetooth headset) showed real
+/// devices also front-clip capture while their mic path wakes from idle,
+/// eating leading words ("I said can you hear me" arrived as "can you hear
+/// me"). 1500 ms buys back most of that ramp at a trivial memory cost
+/// (~1.5 s of 16 kHz mono).
+pub const PREROLL_DURATION: Duration = Duration::from_millis(1500);
 
 /// [`PREROLL_DURATION`] expressed in frames at [`buzztalk_core::FRAME_MS`].
 pub const PREROLL_FRAMES: usize =

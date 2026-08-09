@@ -32,6 +32,13 @@ pub(crate) trait AudioEngine: Send {
     fn push_playback(&mut self, samples: &[f32]) -> usize;
     /// Snapshot of overrun/underrun counters.
     fn stats(&self) -> EngineStats;
+    /// True once the engine's underlying streams have reported an error
+    /// (device disconnected, default route changed, format renegotiated)
+    /// and can no longer be trusted. Defaults to `false` for engines that
+    /// cannot fail this way (the test fake, simulate mode).
+    fn failed(&self) -> bool {
+        false
+    }
 }
 
 impl AudioEngine for DuplexEngine {
@@ -49,6 +56,10 @@ impl AudioEngine for DuplexEngine {
 
     fn stats(&self) -> EngineStats {
         DuplexEngine::stats(self)
+    }
+
+    fn failed(&self) -> bool {
+        DuplexEngine::stream_failed(self)
     }
 }
 

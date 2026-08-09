@@ -16,7 +16,7 @@ use buzztalk_audio::{detect_output_route, DuplexConfig, DuplexEngine};
 use buzztalk_core::{DetectorEvent, EchoCanceller, OutputRoute, SpeechDetector, FRAME_SAMPLES};
 use buzztalk_session::{Frame, Input, Output, SessionMachine, SessionState, TurnId};
 use buzztalk_stt::Resampler48to16;
-use buzztalk_vad::{BargeInDetector, EndpointDetector};
+use buzztalk_vad::{BargeInDetector, EndpointConfig, EndpointDetector};
 
 use crate::agent::{AgentBackend, AgentEvent, EchoAgent};
 use crate::audio_engine::AudioEngine;
@@ -48,6 +48,39 @@ const LOOP_SLEEP: Duration = Duration::from_millis(5);
 /// it. Generous enough to never fire on a healthy device under load.
 const MIC_STALL_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// How often the orchestrator polls the host's default-device signature
+/// and the engine's failure flag. A couple of CoreAudio property reads per
+/// second -- negligible next to the audio work, fast enough that a device
+/// swap heals within about a second.
+const DEVICE_CHECK_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// The recipe for reopening the audio engine on the current default
+/// devices, kept by the orchestrator so it can rebuild live when a device
+/// disappears or renegotiates its format. `None` in simulate mode.
+type EngineFactory = Box<dyn Fn() -> buzztalk_core::Result<Box<dyn AudioEngine>> + Send>;
+
+/// Which halves of [`buzztalk_audio::default_devices_signature`] the device
+/// watchdog should react to -- a direction pinned to an explicit device in
+/// [`DuplexConfig`] ignores changes to the host default for that direction.
+#[derive(Clone, Copy)]
+struct SignatureMask {
+    input: bool,
+    output: bool,
+}
+
+impl SignatureMask {
+    /// Reduce a full `in:...|out:...` signature to only the tracked parts.
+    fn apply(&self, full: &str) -> String {
+        full.split('|')
+            .filter(|part| {
+                (self.input && part.starts_with("in:"))
+                    || (self.output && part.starts_with("out:"))
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+}
+
 /// Configuration for [`ConversationPipeline::start`].
 pub struct PipelineConfig {
     /// Passed straight through to `DuplexEngine::start`.
@@ -72,6 +105,12 @@ pub struct PipelineConfig {
     /// See [`ConversationPipeline::start`]'s caller (`buzztalk-demo`'s
     /// `--no-aec`) for the loud warning this is meant to come with.
     pub no_aec: bool,
+    /// End-of-speech silence, in milliseconds, before the endpointer
+    /// declares the user's turn over. `None` keeps
+    /// [`buzztalk_vad::EndpointConfig`]'s default (~300 ms). Live testing
+    /// (2026-08-09) showed 300 ms splits thinking-aloud sentences into
+    /// separate turns; ~1000 ms suits conversational speech.
+    pub endpoint_silence_ms: Option<u64>,
 }
 
 impl Default for PipelineConfig {
@@ -82,6 +121,7 @@ impl Default for PipelineConfig {
             simulate_capture: None,
             agent: Box::new(EchoAgent::new()),
             no_aec: false,
+            endpoint_silence_ms: None,
         }
     }
 }
@@ -169,6 +209,15 @@ pub enum PipelineEvent {
         /// Why, in human-readable terms.
         reason: String,
     },
+    /// The audio engine was torn down and rebuilt on the current default
+    /// devices — a stream errored, the default device or its sample rate
+    /// changed (Bluetooth headsets renegotiate around profile switches and
+    /// silently corrupt a stale-rate stream), or capture stalled. The
+    /// session was restarted; anything mid-utterance was abandoned.
+    AudioDeviceRebuilt {
+        /// Which trigger fired, in human-readable terms.
+        reason: String,
+    },
     /// The session's phase just changed.
     StateChanged(SessionState),
     /// An interim transcript for the user's in-progress utterance.
@@ -234,9 +283,32 @@ impl ConversationPipeline {
             simulate_capture,
             agent,
             no_aec,
+            endpoint_silence_ms,
         } = config;
 
-        let engine: Box<dyn AudioEngine> = Box::new(DuplexEngine::start(duplex)?);
+        let engine: Box<dyn AudioEngine> = Box::new(DuplexEngine::start(duplex.clone())?);
+        // Real devices come and go (and Bluetooth headsets renegotiate
+        // formats under a running stream) -- keep the recipe for opening
+        // the engine so the orchestrator can rebuild it live. Simulate
+        // mode reads a WAV; there is nothing to rebuild.
+        // When the config pins an explicit device for a direction, changes
+        // to the host's *default* for that direction are irrelevant -- the
+        // engine isn't following the default there. macOS flips defaults
+        // freely around Bluetooth profile switches, and tracking a pinned
+        // direction turns every flip into a needless rebuild.
+        let signature_mask = SignatureMask {
+            input: duplex.input_device.is_none(),
+            output: duplex.output_device.is_none(),
+        };
+        let engine_factory: Option<EngineFactory> = simulate_capture.is_none().then(|| {
+            let cfg = duplex;
+            Box::new(move || {
+                DuplexEngine::start(cfg.clone()).map(|e| Box::new(e) as Box<dyn AudioEngine>)
+            }) as EngineFactory
+        });
+        let device_signature = simulate_capture
+            .is_none()
+            .then(|| signature_mask.apply(&buzztalk_audio::default_devices_signature()));
         let aec: Box<dyn EchoCanceller> = if no_aec {
             Box::new(NullCanceller)
         } else {
@@ -265,10 +337,29 @@ impl ConversationPipeline {
         let (control_tx, control_rx) = mpsc::channel();
         let (events_tx, events_rx) = mpsc::channel();
 
+        let endpoint = match endpoint_silence_ms {
+            Some(ms) => {
+                let frame_ms = u64::from(buzztalk_core::FRAME_MS);
+                EndpointDetector::new(EndpointConfig {
+                    // Round up so e.g. 995 ms never silently shortens the
+                    // requested window, and never drop below one frame.
+                    hangover_frames: (ms.div_ceil(frame_ms)).max(1) as u32,
+                    ..EndpointConfig::default()
+                })
+            }
+            None => EndpointDetector::default(),
+        };
         let mut orchestrator = Orchestrator {
             engine,
+            engine_factory,
+            device_signature,
+            signature_mask,
+            device_check_elapsed: Duration::ZERO,
+            rebuild_failures: 0,
+            stall_rebuild_attempted: false,
+            no_aec,
             aec,
-            endpoint: EndpointDetector::default(),
+            endpoint,
             bargein: BargeInDetector::new(Default::default()),
             session: SessionMachine::new(),
             resampler_16k: Resampler48to16::new(),
@@ -366,6 +457,28 @@ impl Drop for ConversationPipeline {
 /// dozen loose variables.
 struct Orchestrator {
     engine: Box<dyn AudioEngine>,
+    /// See [`EngineFactory`]. `None` in simulate mode and in tests, which
+    /// also disables the device watchdog entirely.
+    engine_factory: Option<EngineFactory>,
+    /// The default-device fingerprint the current engine was opened
+    /// against ([`buzztalk_audio::default_devices_signature`], reduced by
+    /// [`SignatureMask`]); a change means the engine's streams are stale
+    /// even if no error fired.
+    device_signature: Option<String>,
+    /// See [`SignatureMask`].
+    signature_mask: SignatureMask,
+    /// Accumulates toward [`DEVICE_CHECK_INTERVAL`].
+    device_check_elapsed: Duration,
+    /// Consecutive failed rebuild attempts, for throttling the error spam
+    /// while a device is genuinely gone.
+    rebuild_failures: u32,
+    /// Whether the current mic stall has already spent its one rebuild
+    /// attempt -- a stall that persists across a rebuild means the device
+    /// is silent, not stale, and rebuilding again won't help. Cleared when
+    /// capture frames flow again or the device signature changes.
+    stall_rebuild_attempted: bool,
+    /// Recreate the canceller to match a rebuilt engine (`--no-aec` state).
+    no_aec: bool,
     aec: Box<dyn EchoCanceller>,
     endpoint: EndpointDetector,
     bargein: BargeInDetector,
@@ -508,6 +621,7 @@ impl Orchestrator {
 
         self.pump_audio();
         self.check_mic_health(dt);
+        self.check_device_health(dt);
 
         self.drain_stt_results();
 
@@ -607,6 +721,103 @@ impl Orchestrator {
                     MIC_STALL_TIMEOUT
                 ),
             });
+        }
+    }
+
+    /// Watchdog for the real audio device: every
+    /// [`DEVICE_CHECK_INTERVAL`], rebuild the engine when a stream has
+    /// errored, the host's default-device signature has changed (the
+    /// silent Bluetooth renegotiation case -- the stale stream keeps
+    /// running but feeds the recognizer time-warped audio), or capture has
+    /// stalled (one attempt per stall). Live testing 2026-08-09: every
+    /// manual daemon restart instantly fixed transcription on an untouched
+    /// headset -- this is that restart, automated and scoped to the
+    /// engine.
+    fn check_device_health(&mut self, dt: Duration) {
+        if self.simulate_frames.is_some() {
+            return;
+        }
+        let Some(factory) = &self.engine_factory else {
+            return;
+        };
+        self.device_check_elapsed += dt;
+        if self.device_check_elapsed < DEVICE_CHECK_INTERVAL {
+            return;
+        }
+        self.device_check_elapsed = Duration::ZERO;
+
+        let signature_now = self
+            .signature_mask
+            .apply(&buzztalk_audio::default_devices_signature());
+        let signature_changed = self
+            .device_signature
+            .as_deref()
+            .is_some_and(|s| s != signature_now);
+        let failed = self.engine.failed();
+        let stalled = self.mic_stall_reported && !self.stall_rebuild_attempted;
+        if self.saw_capture_frame_this_tick || !self.mic_stall_reported {
+            // Frames are flowing (or never stalled): a future stall gets a
+            // fresh rebuild attempt.
+            self.stall_rebuild_attempted = false;
+        }
+        if !(failed || signature_changed || stalled) {
+            return;
+        }
+
+        let reason = if signature_changed {
+            format!("default device changed ({signature_now})")
+        } else if failed {
+            "audio stream error".to_string()
+        } else {
+            "capture stalled".to_string()
+        };
+        if stalled && !failed && !signature_changed {
+            self.stall_rebuild_attempted = true;
+        }
+
+        match factory() {
+            Ok(new_engine) => {
+                self.engine = new_engine;
+                self.device_signature = Some(signature_now);
+                self.rebuild_failures = 0;
+                // Everything downstream of the old streams is stale:
+                // canceller adaptation, resampler phase, detector noise
+                // floors, and any half-fed utterance.
+                self.aec = if self.no_aec {
+                    Box::new(NullCanceller)
+                } else {
+                    new_best_available()
+                };
+                self.resampler_16k.reset();
+                self.endpoint.reset();
+                self.bargein.reset();
+                if let Some(stt) = &self.stt {
+                    stt.reset();
+                }
+                self.stt_active_turn = None;
+                self.pending_ref.clear();
+                self.pending_cap.clear();
+                self.playback_pushed_samples = 0;
+                self.playback_push_started_at = None;
+                self.mic_silence_elapsed = Duration::ZERO;
+                self.mic_stall_reported = false;
+                let _ = self.events_tx.send(PipelineEvent::AudioDeviceRebuilt {
+                    reason: reason.clone(),
+                });
+                // End-then-start so a turn never straddles two engines.
+                self.dispatch(Input::SessionEnd);
+                self.dispatch(Input::SessionStart);
+            }
+            Err(err) => {
+                self.rebuild_failures += 1;
+                // First failure and every ~10s thereafter, not every tick.
+                if self.rebuild_failures == 1 || self.rebuild_failures.is_multiple_of(10) {
+                    let _ = self.events_tx.send(PipelineEvent::CapabilityLost {
+                        what: "audio-device",
+                        reason: format!("engine rebuild failed ({err}); will keep retrying"),
+                    });
+                }
+            }
         }
     }
 
@@ -1228,6 +1439,16 @@ mod tests {
         let (events_tx, events_rx) = mpsc::channel();
         let orchestrator = Orchestrator {
             engine,
+            engine_factory: None,
+            device_signature: None,
+            signature_mask: SignatureMask {
+                input: true,
+                output: true,
+            },
+            device_check_elapsed: Duration::ZERO,
+            rebuild_failures: 0,
+            stall_rebuild_attempted: false,
+            no_aec: true,
             aec: Box::new(NullCanceller),
             endpoint: EndpointDetector::default(),
             bargein: BargeInDetector::new(Default::default()),

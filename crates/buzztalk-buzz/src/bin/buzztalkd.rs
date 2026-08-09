@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 use buzztalk_buzz::{BuzzAgent, BuzzConfig, KeySource, PublicKey, Uuid};
 use buzztalk_pipeline::{ConversationPipeline, OutputRoute, PipelineConfig, PipelineEvent};
+use buzztalk_session::SessionState;
 
 struct Args {
     relay: String,
@@ -46,6 +47,8 @@ struct Args {
     agent_pubkeys: Vec<PublicKey>,
     key_source: KeySource,
     quiet_period: Option<Duration>,
+    endpoint_silence_ms: Option<u64>,
+    output_device: Option<String>,
     headphones: bool,
     no_aec: bool,
     simulate: Option<PathBuf>,
@@ -60,6 +63,8 @@ impl Args {
         let mut key_env = None;
         let mut key_file = None;
         let mut quiet_period = None;
+        let mut endpoint_silence_ms = None;
+        let mut output_device = None;
         let mut headphones = false;
         let mut no_aec = false;
         let mut simulate = None;
@@ -94,6 +99,16 @@ impl Args {
                         .parse()
                         .map_err(|_| format!("--quiet-period-ms {raw:?} is not a number"))?;
                     quiet_period = Some(Duration::from_millis(ms));
+                }
+                "--endpoint-silence-ms" => {
+                    let raw = require_value(&mut it, "--endpoint-silence-ms")?;
+                    let ms: u64 = raw
+                        .parse()
+                        .map_err(|_| format!("--endpoint-silence-ms {raw:?} is not a number"))?;
+                    endpoint_silence_ms = Some(ms);
+                }
+                "--output-device" => {
+                    output_device = Some(require_value(&mut it, "--output-device")?);
                 }
                 "--headphones" => headphones = true,
                 "--no-aec" => no_aec = true,
@@ -130,6 +145,8 @@ impl Args {
             agent_pubkeys,
             key_source,
             quiet_period,
+            endpoint_silence_ms,
+            output_device,
             headphones,
             no_aec,
             simulate,
@@ -232,10 +249,15 @@ fn main() {
     };
 
     let pipeline_config = PipelineConfig {
+        duplex: buzztalk_pipeline::DuplexConfig {
+            output_device: args.output_device.clone(),
+            ..Default::default()
+        },
         forced_output_route: args.headphones.then_some(OutputRoute::Headphones),
         simulate_capture: args.simulate,
         agent: Box::new(agent),
         no_aec: args.no_aec,
+        endpoint_silence_ms: args.endpoint_silence_ms,
         ..Default::default()
     };
 
@@ -277,7 +299,21 @@ fn main() {
             Some(PipelineEvent::CapabilityLost { what, reason }) => {
                 println!("[lost]    {what}: {reason}")
             }
-            Some(PipelineEvent::StateChanged(state)) => println!("[state]   {state:?}"),
+            Some(PipelineEvent::AudioDeviceRebuilt { reason }) => {
+                println!("[audio]   engine rebuilt: {reason}")
+            }
+            Some(PipelineEvent::StateChanged(state)) => {
+                println!("[state]   {state:?}");
+                // The session machine ends the session after IDLE_TIMEOUT
+                // (90 s) of silence -- right for the interactive demo, wrong
+                // for a daemon meant to run unattended: one quiet minute and
+                // a half would leave the process alive but deaf forever.
+                // Re-arm immediately so Listening is the steady state.
+                if state == SessionState::Idle {
+                    println!("[state]   idle timeout -- restarting session");
+                    pipeline.start_session();
+                }
+            }
             Some(PipelineEvent::Partial(text)) => {
                 if text != last_partial {
                     println!("[partial] {text}");

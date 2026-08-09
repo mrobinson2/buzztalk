@@ -127,9 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn default_capacity_matches_500ms_at_10ms_frames() {
+    fn default_capacity_matches_preroll_duration_at_10ms_frames() {
         let buf = PreRollBuffer::new();
-        assert_eq!(buf.capacity(), 50);
+        assert_eq!(buf.capacity(), PREROLL_FRAMES);
+        assert_eq!(buf.capacity(), 150); // 1500 ms at 10 ms frames
     }
 
     #[test]

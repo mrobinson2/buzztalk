@@ -237,6 +237,12 @@ struct Counters {
     /// Samples passed to `push_playback` that didn't fit in the playback
     /// ring and were dropped (not written, not played).
     playback_samples_dropped: AtomicU64,
+    /// Times either stream's error callback fired (device disconnected,
+    /// default device changed, format renegotiated under us). Any non-zero
+    /// value means this engine's streams can no longer be trusted and the
+    /// owner should rebuild the engine — see
+    /// [`DuplexEngine::stream_failed`].
+    stream_errors: AtomicU64,
 }
 
 /// Snapshot of [`DuplexEngine`]'s overrun/underrun counters.
@@ -422,6 +428,17 @@ impl DuplexEngine {
         self.output_latency_ms
     }
 
+    /// True once either stream's error callback has fired (device
+    /// disconnected, default route changed, format renegotiated). The
+    /// streams may still appear to run, but their audio can no longer be
+    /// trusted — Bluetooth headsets in particular renegotiate their format
+    /// around profile switches and then feed a stale-rate stream
+    /// time-warped audio. The owner should drop this engine and start a
+    /// fresh one.
+    pub fn stream_failed(&self) -> bool {
+        self.counters.stream_errors.load(Ordering::Relaxed) > 0
+    }
+
     /// Snapshot of overrun/underrun counters.
     pub fn stats(&self) -> EngineStats {
         EngineStats {
@@ -445,6 +462,42 @@ impl DuplexEngine {
     }
 }
 
+/// A cheap fingerprint of the host's current default input and output
+/// devices: names plus their advertised default sample rates.
+///
+/// Bluetooth headsets renegotiate their format around profile switches
+/// (A2DP <-> HFP, typically when playback starts or stops) *without*
+/// firing a stream error — the stale stream keeps running and delivers
+/// time-warped audio. Polling this signature and rebuilding the engine
+/// when it changes is how an owner catches that silent renegotiation.
+/// Costs a couple of CoreAudio property reads; fine at ~1 Hz.
+pub fn default_devices_signature() -> String {
+    let host = cpal::default_host();
+    let describe_in = host
+        .default_input_device()
+        .map(|d| {
+            let name = d.to_string();
+            let rate = d
+                .default_input_config()
+                .map(|c| c.sample_rate())
+                .unwrap_or(0);
+            format!("{name}@{rate}")
+        })
+        .unwrap_or_else(|| "none".into());
+    let describe_out = host
+        .default_output_device()
+        .map(|d| {
+            let name = d.to_string();
+            let rate = d
+                .default_output_config()
+                .map(|c| c.sample_rate())
+                .unwrap_or(0);
+            format!("{name}@{rate}")
+        })
+        .unwrap_or_else(|| "none".into());
+    format!("in:{describe_in}|out:{describe_out}")
+}
+
 fn build_input_stream(
     device: &cpal::Device,
     chosen: &ChosenConfig,
@@ -454,6 +507,7 @@ fn build_input_stream(
     let channels = chosen.stream_config.channels as usize;
     let mut resampler = (chosen.device_rate != SAMPLE_RATE_HZ)
         .then(|| Resampler::new(chosen.device_rate, SAMPLE_RATE_HZ));
+    let error_counters = Arc::clone(&counters);
 
     device
         .build_input_stream(
@@ -480,7 +534,10 @@ fn build_input_stream(
                     }
                 }
             },
-            |err| eprintln!("buzztalk-audio: input stream error: {err}"),
+            move |err| {
+                error_counters.stream_errors.fetch_add(1, Ordering::Relaxed);
+                eprintln!("buzztalk-audio: input stream error: {err}");
+            },
             None,
         )
         .map_err(|e| Error::Device(format!("building input stream: {e}")))
@@ -499,6 +556,7 @@ fn build_output_stream(
         needs_resample.then(|| Resampler::new(SAMPLE_RATE_HZ, chosen.device_rate));
     let mut render_ref_resampler =
         needs_resample.then(|| Resampler::new(chosen.device_rate, SAMPLE_RATE_HZ));
+    let error_counters = Arc::clone(&counters);
 
     device
         .build_output_stream(
@@ -543,7 +601,10 @@ fn build_output_stream(
                     }
                 }
             },
-            |err| eprintln!("buzztalk-audio: output stream error: {err}"),
+            move |err| {
+                error_counters.stream_errors.fetch_add(1, Ordering::Relaxed);
+                eprintln!("buzztalk-audio: output stream error: {err}");
+            },
             None,
         )
         .map_err(|e| Error::Device(format!("building output stream: {e}")))
