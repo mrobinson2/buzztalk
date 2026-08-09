@@ -22,13 +22,13 @@ repository = "https://github.com/mrobinson2/buzztalk"
 description = "Full-duplex voice conversation layer for Buzz"
 
 [workspace.dependencies]
-buzztalk-core = { path = "crates/buzztalk-core" }
-buzztalk-aec = { path = "crates/buzztalk-aec" }
-buzztalk-audio = { path = "crates/buzztalk-audio" }
-buzztalk-vad = { path = "crates/buzztalk-vad" }
-buzztalk-stt = { path = "crates/buzztalk-stt" }
-buzztalk-session = { path = "crates/buzztalk-session" }
-buzztalk-tts = { path = "crates/buzztalk-tts" }
-buzztalk-pipeline = { path = "crates/buzztalk-pipeline" }
-buzztalk-buzz = { path = "crates/buzztalk-buzz" }
+buzztalk-core = { path = "crates/buzztalk-core", version = "0.1.0" }
+buzztalk-aec = { path = "crates/buzztalk-aec", version = "0.1.0" }
+buzztalk-audio = { path = "crates/buzztalk-audio", version = "0.1.0" }
+buzztalk-vad = { path = "crates/buzztalk-vad", version = "0.1.0" }
+buzztalk-stt = { path = "crates/buzztalk-stt", version = "0.1.0" }
+buzztalk-session = { path = "crates/buzztalk-session", version = "0.1.0" }
+buzztalk-tts = { path = "crates/buzztalk-tts", version = "0.1.0" }
+buzztalk-pipeline = { path = "crates/buzztalk-pipeline", version = "0.1.0" }
+buzztalk-buzz = { path = "crates/buzztalk-buzz", version = "0.1.0" }
 thiserror = "2"

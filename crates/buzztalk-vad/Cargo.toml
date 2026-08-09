@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["audio","vad","voice-activity","speech","barge-in"]
+categories = ["multimedia::audio","algorithms"]
 description = "Deterministic voice-activity detectors for BuzzTalk: permissive endpointing and strict, echo-gated barge-in"
 
 [dependencies]

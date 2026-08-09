@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["audio","echo-cancellation","aec","webrtc","voice"]
+categories = ["multimedia::audio","algorithms"]
 description = "Acoustic echo cancellation backends for BuzzTalk (bake-off crate)"
 
 # Note: rust-version deliberately NOT inherited from the workspace here. The
