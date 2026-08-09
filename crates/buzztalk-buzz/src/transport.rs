@@ -231,6 +231,7 @@ fn handle_relay_text(
                 channel_id: config.channel_id,
                 own_pubkey: *own_pubkey,
                 agent_pubkeys: &config.agent_pubkeys,
+                speak_only_user_directed: config.speak_only_user_directed,
             };
             if eligibility::is_speakable(&event, &ctx).is_ok() {
                 let _ = reply_tx.send(event.content.clone());

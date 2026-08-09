@@ -49,6 +49,7 @@ struct Args {
     quiet_period: Option<Duration>,
     endpoint_silence_ms: Option<u64>,
     output_device: Option<String>,
+    speak_all: bool,
     headphones: bool,
     no_aec: bool,
     vpio: bool,
@@ -66,6 +67,7 @@ impl Args {
         let mut quiet_period = None;
         let mut endpoint_silence_ms = None;
         let mut output_device = None;
+        let mut speak_all = false;
         let mut headphones = false;
         let mut no_aec = false;
         let mut vpio = false;
@@ -112,6 +114,7 @@ impl Args {
                 "--output-device" => {
                     output_device = Some(require_value(&mut it, "--output-device")?);
                 }
+                "--speak-all" => speak_all = true,
                 "--headphones" => headphones = true,
                 "--no-aec" => no_aec = true,
                 "--vpio" => vpio = true,
@@ -150,6 +153,7 @@ impl Args {
             quiet_period,
             endpoint_silence_ms,
             output_device,
+            speak_all,
             headphones,
             no_aec,
             vpio,
@@ -222,6 +226,7 @@ fn main() {
     if let Some(quiet_period) = args.quiet_period {
         buzz_config.reply_quiet_period = quiet_period;
     }
+    buzz_config.speak_only_user_directed = !args.speak_all;
 
     println!("buzztalkd starting");
     println!("  relay:   {}", args.relay);

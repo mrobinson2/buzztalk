@@ -124,6 +124,13 @@ pub struct BuzzConfig {
     pub reply_quiet_period: Duration,
     /// Reconnect backoff tuning.
     pub reconnect: ReconnectPolicy,
+    /// Speak only agent messages addressed to the user, suppressing
+    /// inter-agent delegation chatter (see
+    /// [`crate::eligibility::EligibilityContext::speak_only_user_directed`]).
+    /// Defaults to `true`: with a dispatcher-style crew it keeps
+    /// `@teammate ...` routing messages out of the user's ears while still
+    /// speaking the dispatcher's acknowledgements and relayed answers.
+    pub speak_only_user_directed: bool,
 }
 
 impl BuzzConfig {
@@ -140,6 +147,7 @@ impl BuzzConfig {
             agent_pubkeys: Vec::new(),
             reply_quiet_period: DEFAULT_QUIET_PERIOD,
             reconnect: ReconnectPolicy::default(),
+            speak_only_user_directed: true,
         }
     }
 

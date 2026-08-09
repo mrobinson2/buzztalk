@@ -15,9 +15,9 @@
 //!
 //! [`ConversationPipeline::start`]: crate::ConversationPipeline::start
 
-use buzztalk_audio::{DuplexEngine, EngineStats};
 #[cfg(target_os = "macos")]
 use buzztalk_audio::VoiceProcessingEngine;
+use buzztalk_audio::{DuplexEngine, EngineStats};
 
 /// The orchestrator's view of a full-duplex audio engine: pull capture and
 /// render-reference frames, push playback, read overrun/underrun counters.

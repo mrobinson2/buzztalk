@@ -45,6 +45,11 @@ pub enum RejectReason {
     Empty,
     /// Content starts with [`SYSTEM_PREFIX`].
     SystemMessage,
+    /// The message p-tags other participants but not the user -- it's a
+    /// dispatcher agent talking to its teammates (delegation), not
+    /// answering the user, so it isn't read aloud. Only applies when
+    /// [`EligibilityContext::speak_only_user_directed`] is set.
+    NotAddressedToUser,
 }
 
 impl std::fmt::Display for RejectReason {
@@ -56,6 +61,7 @@ impl std::fmt::Display for RejectReason {
             RejectReason::UnknownAuthor => "author is not a known agent pubkey",
             RejectReason::Empty => "empty content",
             RejectReason::SystemMessage => "system message",
+            RejectReason::NotAddressedToUser => "addressed to another agent, not the user",
         };
         f.write_str(s)
     }
@@ -67,10 +73,21 @@ pub struct EligibilityContext<'a> {
     /// The channel BuzzTalk is bridging.
     pub channel_id: Uuid,
     /// This identity's own pubkey (never speaks its own messages back to
-    /// itself).
+    /// itself). Because `buzztalkd` signs the user's spoken messages, this
+    /// is also *the user's* pubkey -- a message that p-tags it is one
+    /// addressed to the user.
     pub own_pubkey: PublicKey,
     /// Pubkeys BuzzTalk accepts replies from.
     pub agent_pubkeys: &'a [PublicKey],
+    /// When set, an agent message that p-tags other participants but not
+    /// the user ([`own_pubkey`]) is rejected as [`RejectReason::NotAddressedToUser`].
+    /// This is what keeps a dispatcher agent's `@teammate ...` delegation
+    /// chatter out of the spoken stream while still reading its "on it" and
+    /// its relayed answers back to the user. A message with no p-tags at
+    /// all is always eligible (a plain reply to the user).
+    ///
+    /// [`own_pubkey`]: Self::own_pubkey
+    pub speak_only_user_directed: bool,
 }
 
 /// Decide whether `event` is a speakable agent reply, per Buzz's rules
@@ -113,6 +130,19 @@ pub fn is_speakable(event: &Event, ctx: &EligibilityContext<'_>) -> Result<(), R
         return Err(RejectReason::SystemMessage);
     }
 
+    if ctx.speak_only_user_directed {
+        let mut p_tags = event.tags.iter().filter(|t| t.kind() == "p").peekable();
+        // Only filter messages that actually address someone by p-tag. A
+        // plain reply (no p-tags) is for the user and stays speakable.
+        if p_tags.peek().is_some() {
+            let own_hex = ctx.own_pubkey.to_hex();
+            let addresses_user = p_tags.any(|t| t.content() == Some(own_hex.as_str()));
+            if !addresses_user {
+                return Err(RejectReason::NotAddressedToUser);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -149,6 +179,101 @@ mod tests {
                 .finalize(signer)
                 .unwrap()
         }
+
+        /// Like [`Self::event`] but p-tags each pubkey in `mentions` --
+        /// used to exercise the user-directed speech filter.
+        fn event_mentioning(
+            &self,
+            signer: &Keys,
+            channel: Uuid,
+            content: &str,
+            mentions: &[PublicKey],
+        ) -> Event {
+            let mut b = EventBuilder::new(Kind::Custom(KIND_STREAM_MESSAGE), content)
+                .tag(Tag::parse(["h", &channel.to_string()]).unwrap());
+            for pk in mentions {
+                b = b.tag(Tag::parse(["p", &pk.to_hex()]).unwrap());
+            }
+            b.finalize(signer).unwrap()
+        }
+    }
+
+    #[test]
+    fn user_directed_filter_speaks_reply_that_mentions_the_user() {
+        let f = Fixture::new();
+        let ctx = EligibilityContext {
+            channel_id: f.channel_id,
+            own_pubkey: f.own.public_key(),
+            agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: true,
+        };
+        // Coordinator relaying an answer back to the user.
+        let event = f.event_mentioning(
+            &f.agent,
+            f.channel_id,
+            "Jupiter is the largest planet.",
+            &[f.own.public_key()],
+        );
+        assert_eq!(is_speakable(&event, &ctx), Ok(()));
+    }
+
+    #[test]
+    fn user_directed_filter_speaks_untagged_reply() {
+        let f = Fixture::new();
+        let ctx = EligibilityContext {
+            channel_id: f.channel_id,
+            own_pubkey: f.own.public_key(),
+            agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: true,
+        };
+        // A plain "on it" acknowledgement with no p-tags is for the user.
+        let event = f.event(
+            &f.agent,
+            KIND_STREAM_MESSAGE,
+            f.channel_id,
+            "On it, checking now.",
+        );
+        assert_eq!(is_speakable(&event, &ctx), Ok(()));
+    }
+
+    #[test]
+    fn user_directed_filter_suppresses_delegation_to_a_teammate() {
+        let f = Fixture::new();
+        let ctx = EligibilityContext {
+            channel_id: f.channel_id,
+            own_pubkey: f.own.public_key(),
+            agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: true,
+        };
+        // Coordinator delegating to a teammate, not addressing the user.
+        let event = f.event_mentioning(
+            &f.agent,
+            f.channel_id,
+            "who played Han Solo?",
+            &[f.other_agent.public_key()],
+        );
+        assert_eq!(
+            is_speakable(&event, &ctx),
+            Err(RejectReason::NotAddressedToUser)
+        );
+    }
+
+    #[test]
+    fn user_directed_filter_off_speaks_delegation() {
+        let f = Fixture::new();
+        let ctx = EligibilityContext {
+            channel_id: f.channel_id,
+            own_pubkey: f.own.public_key(),
+            agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
+        };
+        let event = f.event_mentioning(
+            &f.agent,
+            f.channel_id,
+            "who played Han Solo?",
+            &[f.other_agent.public_key()],
+        );
+        assert_eq!(is_speakable(&event, &ctx), Ok(()));
     }
 
     #[test]
@@ -158,6 +283,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.agent, KIND_STREAM_MESSAGE, f.channel_id, "hello there");
         assert_eq!(is_speakable(&event, &ctx), Ok(()));
@@ -170,6 +296,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(
             &f.agent,
@@ -187,6 +314,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key(), f.other_agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.other_agent, KIND_STREAM_MESSAGE, f.channel_id, "hi");
         assert_eq!(is_speakable(&event, &ctx), Ok(()));
@@ -199,6 +327,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         // kind:1 (global text note) instead of a stream message.
         let event = f.event(&f.agent, 1, f.channel_id, "hello there");
@@ -212,6 +341,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = EventBuilder::new(Kind::Custom(KIND_STREAM_MESSAGE), "hi")
             .finalize(&f.agent)
@@ -229,6 +359,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(
             &f.agent,
@@ -251,6 +382,7 @@ mod tests {
             // Deliberately include our own pubkey in the agent list too --
             // self-authorship must still win over "known agent".
             agent_pubkeys: &[f.own.public_key(), f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.own, KIND_STREAM_MESSAGE, f.channel_id, "echo");
         assert_eq!(is_speakable(&event, &ctx), Err(RejectReason::SelfAuthored));
@@ -263,6 +395,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.stranger, KIND_STREAM_MESSAGE, f.channel_id, "hi");
         assert_eq!(is_speakable(&event, &ctx), Err(RejectReason::UnknownAuthor));
@@ -275,6 +408,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.agent, KIND_STREAM_MESSAGE, f.channel_id, "   ");
         assert_eq!(is_speakable(&event, &ctx), Err(RejectReason::Empty));
@@ -287,6 +421,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = f.event(
             &f.agent,
@@ -306,6 +441,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()],
+            speak_only_user_directed: false,
         };
         let event = EventBuilder::new(Kind::Custom(1), "hi")
             .finalize(&f.agent)
@@ -323,6 +459,7 @@ mod tests {
             channel_id: f.channel_id,
             own_pubkey: f.own.public_key(),
             agent_pubkeys: &[f.agent.public_key()], // own pubkey NOT listed
+            speak_only_user_directed: false,
         };
         let event = f.event(&f.own, KIND_STREAM_MESSAGE, f.channel_id, "echo");
         assert_eq!(is_speakable(&event, &ctx), Err(RejectReason::SelfAuthored));

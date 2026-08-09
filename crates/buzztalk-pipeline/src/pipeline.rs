@@ -107,8 +107,7 @@ impl SignatureMask {
     fn apply(&self, full: &str) -> String {
         full.split('|')
             .filter(|part| {
-                (self.input && part.starts_with("in:"))
-                    || (self.output && part.starts_with("out:"))
+                (self.input && part.starts_with("in:")) || (self.output && part.starts_with("out:"))
             })
             .collect::<Vec<_>>()
             .join("|")
