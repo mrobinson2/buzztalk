@@ -54,6 +54,12 @@ const MIC_STALL_TIMEOUT: Duration = Duration::from_millis(1500);
 /// swap heals within about a second.
 const DEVICE_CHECK_INTERVAL: Duration = Duration::from_millis(1000);
 
+/// How many consecutive real speech turns may finalize with no words
+/// before the dead-capture watchdog rebuilds the engine. Two would risk
+/// firing on an unlucky pair of coughs; three is a strong signal the
+/// capture stream itself has gone bad (see `handle_stt_result`).
+const DEAD_CAPTURE_EMPTY_FINALS: u32 = 3;
+
 /// The recipe for reopening the audio engine on the current default
 /// devices, kept by the orchestrator so it can rebuild live when a device
 /// disappears or renegotiates its format. `None` in simulate mode.
@@ -411,6 +417,7 @@ impl ConversationPipeline {
             device_check_elapsed: Duration::ZERO,
             rebuild_failures: 0,
             stall_rebuild_attempted: false,
+            consecutive_empty_finals: 0,
             no_aec,
             aec,
             endpoint,
@@ -531,6 +538,10 @@ struct Orchestrator {
     /// is silent, not stale, and rebuilding again won't help. Cleared when
     /// capture frames flow again or the device signature changes.
     stall_rebuild_attempted: bool,
+    /// Consecutive real speech turns that finalized with no words -- the
+    /// dead-capture signal (see [`DEAD_CAPTURE_EMPTY_FINALS`] and
+    /// `handle_stt_result`). Reset by any word-bearing final or a rebuild.
+    consecutive_empty_finals: u32,
     /// Recreate the canceller to match a rebuilt engine (`--no-aec` state).
     no_aec: bool,
     aec: Box<dyn EchoCanceller>,
@@ -788,12 +799,11 @@ impl Orchestrator {
     /// headset -- this is that restart, automated and scoped to the
     /// engine.
     fn check_device_health(&mut self, dt: Duration) {
-        if self.simulate_frames.is_some() {
+        // `rebuild_engine` re-fetches the factory; this is just the guard
+        // that there is one (and we're not in simulate mode).
+        if self.simulate_frames.is_some() || self.engine_factory.is_none() {
             return;
         }
-        let Some(factory) = &self.engine_factory else {
-            return;
-        };
         self.device_check_elapsed += dt;
         if self.device_check_elapsed < DEVICE_CHECK_INTERVAL {
             return;
@@ -829,14 +839,29 @@ impl Orchestrator {
             self.stall_rebuild_attempted = true;
         }
 
+        self.rebuild_engine(reason, Some(signature_now));
+    }
+
+    /// Tear down the current engine and open a fresh one on the current
+    /// default devices, resetting every piece of state that was tied to the
+    /// old streams (canceller adaptation, resampler phase, detector noise
+    /// floors, half-fed utterance) and restarting the session. Shared by
+    /// the device watchdog and the dead-capture watchdog. `new_signature`
+    /// updates the tracked device fingerprint when the caller already
+    /// computed it (`None` recomputes it — the dead-capture path, where no
+    /// device change was detected).
+    fn rebuild_engine(&mut self, reason: String, new_signature: Option<String>) {
+        let Some(factory) = &self.engine_factory else {
+            return;
+        };
         match factory() {
             Ok(new_engine) => {
                 self.engine = new_engine;
-                self.device_signature = Some(signature_now);
+                self.device_signature = Some(new_signature.unwrap_or_else(|| {
+                    self.signature_mask
+                        .apply(&buzztalk_audio::default_devices_signature())
+                }));
                 self.rebuild_failures = 0;
-                // Everything downstream of the old streams is stale:
-                // canceller adaptation, resampler phase, detector noise
-                // floors, and any half-fed utterance.
                 self.aec = if self.no_aec {
                     Box::new(NullCanceller)
                 } else {
@@ -855,9 +880,10 @@ impl Orchestrator {
                 self.playback_push_started_at = None;
                 self.mic_silence_elapsed = Duration::ZERO;
                 self.mic_stall_reported = false;
-                let _ = self.events_tx.send(PipelineEvent::AudioDeviceRebuilt {
-                    reason: reason.clone(),
-                });
+                self.consecutive_empty_finals = 0;
+                let _ = self
+                    .events_tx
+                    .send(PipelineEvent::AudioDeviceRebuilt { reason });
                 // End-then-start so a turn never straddles two engines.
                 self.dispatch(Input::SessionEnd);
                 self.dispatch(Input::SessionStart);
@@ -1013,6 +1039,33 @@ impl Orchestrator {
             SttResult::Final { turn, text } => {
                 if self.session.is_current(turn) {
                     self.metrics.mark_final_transcript();
+                }
+                // Dead-capture watchdog. A final with no alphanumeric
+                // content that nonetheless closed a real speech turn means
+                // the endpointer heard energy but the recognizer got no
+                // words -- the signature of a Bluetooth capture stream that
+                // has silently gone bad (rate renegotiated under us, or the
+                // headset's mic link dropped) while still delivering frames,
+                // so neither the stream-error nor device-signature nor
+                // stall triggers fire. A run of these means rebuild the
+                // engine; a single one is just a cough or a false VAD
+                // trigger and is ignored. A word-bearing final clears it.
+                if text.chars().any(|c| c.is_alphanumeric()) {
+                    self.consecutive_empty_finals = 0;
+                } else {
+                    self.consecutive_empty_finals += 1;
+                    if self.consecutive_empty_finals >= DEAD_CAPTURE_EMPTY_FINALS
+                        && self.simulate_frames.is_none()
+                        && self.engine_factory.is_some()
+                    {
+                        self.rebuild_engine(
+                            format!(
+                                "capture producing no words for {} turns (stream gone bad)",
+                                self.consecutive_empty_finals
+                            ),
+                            None,
+                        );
+                    }
                 }
                 let _ = self
                     .events_tx
@@ -1502,6 +1555,7 @@ mod tests {
             device_check_elapsed: Duration::ZERO,
             rebuild_failures: 0,
             stall_rebuild_attempted: false,
+            consecutive_empty_finals: 0,
             no_aec: true,
             aec: Box::new(NullCanceller),
             endpoint: EndpointDetector::default(),
