@@ -57,6 +57,73 @@ duplex-on-BT starves the headset mic; the interim answer is BT mic in, speakers 
 
 ---
 
+## Quick start
+
+BuzzTalk today is a developer setup, not a one-click install: you build one
+Rust binary, point it at a Buzz relay, and talk. Voice is validated on
+**macOS** (Apple Silicon); Linux/Windows build and pass the offline suite
+but the audio path is unproven there. Honest status lives in the table
+above — this section is the shortest path to talking to an agent.
+
+**Prerequisites**
+
+- Rust 1.88+ (`rustup`; use `~/.cargo/bin/cargo`).
+- A Buzz relay you can reach. Either a hosted community
+  (`wss://<name>.communities.buzz.xyz`) or a local one — `git clone`
+  [block/buzz](https://github.com/block/buzz) and `just relay` (needs
+  Docker).
+- Your Nostr signing key (the identity spoken messages are published as).
+  From the Buzz desktop app it's in your OS keychain; or generate a fresh
+  one for testing.
+- macOS + a headset for the full barge-in experience.
+
+**1. Build and fetch the speech models** (~285 MB, one time)
+
+```bash
+cargo build --release -p buzztalk-buzz --bin buzztalkd
+./target/release/buzztalkd --download-models   # Parakeet STT + Kyutai TTS
+./target/release/buzztalkd --model-status       # verify
+```
+
+**2. Put your signing key in a file** (read once, never logged)
+
+```bash
+umask 077; printf %s 'nsec1…' > ~/buzztalk.key   # or 64-char hex
+```
+
+**3. Talk to an agent**
+
+You need a channel your key is a member of, and at least one Buzz agent in
+it (its pubkey is the `--agent-pubkey`). Then:
+
+```bash
+./target/release/buzztalkd \
+  --relay   wss://<your-community>.communities.buzz.xyz \  # or ws://localhost:3000
+  --channel <channel-uuid> \
+  --agent-pubkey <agent-pubkey> \   # p-tagged on every message; its replies are spoken
+  --key-file ~/buzztalk.key \
+  --vpio \                          # macOS: full-duplex on Bluetooth (recommended)
+  --headphones \                    # in-ear route; drop it for loudspeakers + live AEC
+  --endpoint-silence-ms 700         # pause tolerance for conversational speech
+```
+
+Speak. Your words are transcribed locally, published as a signed message
+from your identity, the agent replies, and the reply is spoken back —
+interrupt it any time by talking. `--vpio` is macOS-only; omit it to use
+the portable two-stream engine (but a Bluetooth headset's mic may get
+starved — see the session report).
+
+**Want the multi-agent "voice-commanded crew" demo** (speak, and a team of
+agents divides the work)? That setup — roles, mention routing, one narrator
+voice — is its own guide: [`docs/VOICE-CREW-SETUP.md`](docs/VOICE-CREW-SETUP.md).
+
+**Not yet turnkey.** No packaged installer, no `cargo install` from
+crates.io, no mic button inside Buzz — those are the roadmap
+([`docs/UPSTREAM-PROPOSAL.md`](docs/UPSTREAM-PROPOSAL.md) for the in-Buzz
+button; [`docs/IOS-VOICE-PORT.md`](docs/IOS-VOICE-PORT.md) for the phone).
+
+---
+
 ## Why this exists
 
 Buzz already has excellent local speech. It ships NVIDIA Parakeet TDT-CTC 110M for
