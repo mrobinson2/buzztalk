@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach artifacts to"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-arm64
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # cpal needs ALSA headers on Linux.
+      - name: Linux audio dev packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Build
+        run: cargo build --release -p buzztalk-pipeline -p buzztalk-buzz
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar czf buzztalk-${{ matrix.target }}.tar.gz -C target/release buzztalk-demo buzztalkd
+          shasum -a 256 buzztalk-${{ matrix.target }}.tar.gz > buzztalk-${{ matrix.target }}.sha256
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/buzztalk-demo.exe,target/release/buzztalkd.exe -DestinationPath buzztalk-${{ matrix.target }}.zip
+          (Get-FileHash buzztalk-${{ matrix.target }}.zip -Algorithm SHA256).Hash | Out-File -Encoding ascii buzztalk-${{ matrix.target }}.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buzztalk-${{ matrix.target }}
+          path: |
+            buzztalk-${{ matrix.target }}.*
+
+  attach:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
