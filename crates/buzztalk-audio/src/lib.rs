@@ -272,14 +272,43 @@ fn push_dropping(producer: &mut HeapProd<f32>, sample: f32, dropped: &AtomicU64)
     }
 }
 
+/// Peak amplitude of the comfort noise written on playback underrun:
+/// ~-66 dBFS, inaudible next to any real content (and below typical
+/// Bluetooth headset noise floors) but enough signal that downstream
+/// stages never see a long run of exact digital zeros.
+///
+/// Why not fill with 0.0: two gates downstream of the render callback
+/// close on sustained digital silence and re-open with a ramp that
+/// swallows the start of the next utterance (the "TTS front-clip" bug).
+/// VoiceProcessingIO runs the far-end signal through its own voice
+/// processing, which gates an idle output chain; and Bluetooth sinks
+/// power-save their amplifier on digital silence and take ~100-300 ms to
+/// wake. Keeping the line dithered holds both open, covering turn starts
+/// and mid-turn synthesis gaps alike.
+const COMFORT_NOISE_AMPLITUDE: f32 = 5.0e-4;
+
+/// Deterministic white-ish comfort-noise sample for underrun `n`, derived
+/// by hashing the underrun counter (SplitMix64 finalizer). Stateless and
+/// allocation-free, so it is safe in the real-time audio callback.
+#[inline(always)]
+fn comfort_noise(n: u64) -> f32 {
+    let mut z = n.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    // Top 24 hash bits -> [0, 2) -> [-1, 1), then scale to the ceiling.
+    let unit = (z >> 40) as f32 / (1u64 << 23) as f32 - 1.0;
+    unit * COMFORT_NOISE_AMPLITUDE
+}
+
 #[inline(always)]
 fn next_playback_sample(consumer: &mut HeapCons<f32>, underrun: &AtomicU64) -> f32 {
     use ringbuf::traits::Consumer;
     match consumer.try_pop() {
         Some(s) => s,
         None => {
-            underrun.fetch_add(1, Ordering::Relaxed);
-            0.0
+            let n = underrun.fetch_add(1, Ordering::Relaxed);
+            comfort_noise(n)
         }
     }
 }
@@ -622,12 +651,18 @@ mod tests {
     use super::*;
     use ringbuf::traits::Consumer;
 
-    /// The core silence-fill contract, exercised without a real device:
+    /// The core underrun-fill contract, exercised without a real device:
     /// drain an empty playback ring the way the output callback does, and
-    /// confirm the render reference still gets a sample (0.0, plus an
-    /// underrun tick) for every device frame instead of a gap.
+    /// confirm the render reference still gets a sample (comfort noise,
+    /// plus an underrun tick) for every device frame instead of a gap.
+    ///
+    /// The fill must be comfort noise, NOT exact zeros: long runs of
+    /// digital silence let downstream gates close (VoiceProcessingIO's
+    /// far-end processing, Bluetooth sinks' power-save mute), and the gate
+    /// re-opening then swallows the start of the next utterance — the
+    /// "TTS front-clip" bug.
     #[test]
-    fn silent_output_still_publishes_to_render_reference() {
+    fn underrun_fill_is_comfort_noise_not_digital_silence() {
         let counters = Counters::default();
         let render_ref_rb = HeapRb::<f32>::new(FRAME_SAMPLES * 4);
         let (mut render_ref_prod, render_ref_cons) = render_ref_rb.split();
@@ -635,11 +670,14 @@ mod tests {
         let (_playback_prod, mut playback_cons) = playback_rb.split();
         let mut reader = FrameReader::new(render_ref_cons);
 
-        // Nothing was ever queued for playback: every pull is silence.
+        // Nothing was ever queued for playback: every pull is an underrun.
         for _ in 0..FRAME_SAMPLES {
             let sample =
                 next_playback_sample(&mut playback_cons, &counters.playback_underrun_samples);
-            assert_eq!(sample, 0.0);
+            assert!(
+                sample.abs() <= COMFORT_NOISE_AMPLITUDE,
+                "fill sample {sample} louder than the comfort-noise ceiling"
+            );
             push_dropping(
                 &mut render_ref_prod,
                 sample,
@@ -653,9 +691,28 @@ mod tests {
         );
         let frame = reader
             .try_recv()
-            .expect("a full silent frame should be ready");
+            .expect("a full underrun-filled frame should be ready");
         assert_eq!(frame.len(), FRAME_SAMPLES);
-        assert!(frame.iter().all(|&s| s == 0.0));
+        assert!(
+            frame.iter().any(|&s| s != 0.0),
+            "underrun fill must not be pure digital silence"
+        );
+        // Noise, not a DC offset or constant: values must actually vary.
+        let distinct = frame
+            .iter()
+            .map(|s| s.to_bits())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            distinct.len() > FRAME_SAMPLES / 4,
+            "underrun fill should look like noise, got {} distinct values",
+            distinct.len()
+        );
+        // And it must average out to (near) zero — no audible DC step.
+        let mean: f32 = frame.iter().sum::<f32>() / frame.len() as f32;
+        assert!(
+            mean.abs() < COMFORT_NOISE_AMPLITUDE / 4.0,
+            "underrun fill has a DC bias: mean {mean}"
+        );
         assert_eq!(
             counters.render_ref_samples_dropped.load(Ordering::Relaxed),
             0
