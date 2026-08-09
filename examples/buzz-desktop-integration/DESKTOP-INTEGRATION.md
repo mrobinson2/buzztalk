@@ -54,15 +54,13 @@ pump wants to *own* the receiver on its own thread without locking the
 state mutex. Add to `buzztalk-pipeline`:
 
 ```rust
-impl ConversationPipeline {
-    /// Take the event receiver for an external pump. The pipeline keeps
-    /// running; the caller owns event delivery.
-    pub fn into_event_rx(&self) -> std::sync::mpsc::Receiver<PipelineEvent> { … }
-}
+pub fn take_event_rx(&mut self) -> Option<Receiver<PipelineEvent>>
 ```
 
-(Or refactor `events_rx` out of the struct into a handle at `start`.) Small
-and mechanical — flagged here rather than faked in the example.
+**Added — this method now exists in `buzztalk-pipeline`.** It hands the
+event `Receiver` to an external pump (returns `None` if already taken);
+after which `recv_event_timeout` returns `None`. The example uses it
+directly.
 
 ## Windows / Linux — testing voice off macOS
 

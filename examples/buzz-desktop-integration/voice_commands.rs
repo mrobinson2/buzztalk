@@ -62,7 +62,7 @@ pub async fn buzztalk_start(
         .with_agent_pubkeys(vec![agent]);
     let backend = BuzzAgent::connect(buzz).map_err(|e| e.to_string())?;
 
-    let pipeline = ConversationPipeline::start(PipelineConfig {
+    let mut pipeline = ConversationPipeline::start(PipelineConfig {
         agent: Box::new(backend),
         use_voice_processing,
         ..Default::default()
@@ -70,14 +70,14 @@ pub async fn buzztalk_start(
     .map_err(|e| e.to_string())?;
     pipeline.start_session();
 
-    // Pump events to the frontend on a background task. `into_event_rx()`
+    // Pump events to the frontend on a background task. `take_event_rx()`
     // is the one small addition to expose on `ConversationPipeline` — it
     // hands out the `Receiver<PipelineEvent>` the pump owns, so the pump
     // isn't contending with start/stop on the state mutex. See
     // DESKTOP-INTEGRATION.md; until it exists, poll `recv_event_timeout`
     // from a task that holds the pipeline.
     let app2 = app.clone();
-    let events = pipeline.into_event_rx();
+    let events = pipeline.take_event_rx().expect("event rx");
     std::thread::spawn(move || {
         while let Ok(ev) = events.recv_timeout(Duration::from_millis(200)) {
             let ui = match ev {

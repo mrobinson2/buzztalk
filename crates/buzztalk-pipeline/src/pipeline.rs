@@ -311,7 +311,10 @@ enum PipelineControl {
 /// threads too.
 pub struct ConversationPipeline {
     control_tx: Sender<PipelineControl>,
-    events_rx: Receiver<PipelineEvent>,
+    // `Some` until an external pump takes it via `take_event_rx` (e.g. a
+    // Tauri/host app streaming events to its UI on its own thread). Once
+    // taken, `recv_event_timeout` returns `None` -- the owner is elsewhere.
+    events_rx: Option<Receiver<PipelineEvent>>,
     orchestrator: Option<JoinHandle<()>>,
     capabilities: Capabilities,
 }
@@ -457,7 +460,7 @@ impl ConversationPipeline {
 
         Ok(Self {
             control_tx,
-            events_rx,
+            events_rx: Some(events_rx),
             orchestrator: Some(handle),
             capabilities,
         })
@@ -493,12 +496,21 @@ impl ConversationPipeline {
 
     /// Non-blocking poll for the next pipeline event.
     pub fn try_recv_event(&self) -> Option<PipelineEvent> {
-        self.events_rx.try_recv().ok()
+        self.events_rx.as_ref()?.try_recv().ok()
     }
 
     /// Block for up to `timeout` for the next pipeline event.
     pub fn recv_event_timeout(&self, timeout: Duration) -> Option<PipelineEvent> {
-        self.events_rx.recv_timeout(timeout).ok()
+        self.events_rx.as_ref()?.recv_timeout(timeout).ok()
+    }
+
+    /// Take ownership of the event receiver so an external pump (a host
+    /// app's own thread streaming events to its UI) can own delivery
+    /// instead of polling [`Self::recv_event_timeout`]. The pipeline keeps
+    /// running; after this, `recv_event_timeout` returns `None`. Returns
+    /// `None` if the receiver was already taken.
+    pub fn take_event_rx(&mut self) -> Option<Receiver<PipelineEvent>> {
+        self.events_rx.take()
     }
 }
 
