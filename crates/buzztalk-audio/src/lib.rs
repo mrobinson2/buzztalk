@@ -40,9 +40,13 @@
 mod framing;
 mod resample;
 mod route;
+#[cfg(target_os = "macos")]
+mod vpio;
 
 pub use framing::FrameReader;
 pub use route::detect_output_route;
+#[cfg(target_os = "macos")]
+pub use vpio::VoiceProcessingEngine;
 
 use buzztalk_core::{Error, Result, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

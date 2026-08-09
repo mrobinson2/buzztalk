@@ -16,6 +16,8 @@
 //! [`ConversationPipeline::start`]: crate::ConversationPipeline::start
 
 use buzztalk_audio::{DuplexEngine, EngineStats};
+#[cfg(target_os = "macos")]
+use buzztalk_audio::VoiceProcessingEngine;
 
 /// The orchestrator's view of a full-duplex audio engine: pull capture and
 /// render-reference frames, push playback, read overrun/underrun counters.
@@ -60,6 +62,33 @@ impl AudioEngine for DuplexEngine {
 
     fn failed(&self) -> bool {
         DuplexEngine::stream_failed(self)
+    }
+}
+
+/// Mirrors the [`DuplexEngine`] impl above, one-to-one, against
+/// `buzztalk-audio`'s macOS-only `VoiceProcessingIO` engine — see
+/// [`crate::pipeline::PipelineConfig::use_voice_processing`] for why a
+/// caller would pick this one instead.
+#[cfg(target_os = "macos")]
+impl AudioEngine for VoiceProcessingEngine {
+    fn try_recv_capture(&mut self) -> Option<Vec<f32>> {
+        VoiceProcessingEngine::try_recv_capture(self)
+    }
+
+    fn try_recv_render_ref(&mut self) -> Option<Vec<f32>> {
+        VoiceProcessingEngine::try_recv_render_ref(self)
+    }
+
+    fn push_playback(&mut self, samples: &[f32]) -> usize {
+        VoiceProcessingEngine::push_playback(self, samples)
+    }
+
+    fn stats(&self) -> EngineStats {
+        VoiceProcessingEngine::stats(self)
+    }
+
+    fn failed(&self) -> bool {
+        VoiceProcessingEngine::stream_failed(self)
     }
 }
 

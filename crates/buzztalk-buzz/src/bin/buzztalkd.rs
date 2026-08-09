@@ -15,9 +15,9 @@
 //! buzztalkd --model-status
 //! ```
 //!
-//! `--headphones`, `--no-aec`, `--simulate [PATH]`, and `--seconds N` mirror
-//! `buzztalk-demo` (`buzztalk-pipeline/src/bin/demo.rs`) exactly, so the two
-//! binaries are interchangeable for manual testing. `--seconds` defaults to
+//! `--headphones`, `--no-aec`, `--vpio`, `--simulate [PATH]`, and `--seconds N`
+//! mirror `buzztalk-demo` (`buzztalk-pipeline/src/bin/demo.rs`) exactly, so the
+//! two binaries are interchangeable for manual testing. `--seconds` defaults to
 //! `0`, meaning "run until the process is killed" -- unlike the demo, this
 //! binary is meant to run unattended. Per the pipeline's design rule
 //! ("every failure degrades to something usable"), a missing STT or TTS
@@ -51,6 +51,7 @@ struct Args {
     output_device: Option<String>,
     headphones: bool,
     no_aec: bool,
+    vpio: bool,
     simulate: Option<PathBuf>,
     seconds: u64,
 }
@@ -67,6 +68,7 @@ impl Args {
         let mut output_device = None;
         let mut headphones = false;
         let mut no_aec = false;
+        let mut vpio = false;
         let mut simulate = None;
         let mut seconds = 0u64;
 
@@ -112,6 +114,7 @@ impl Args {
                 }
                 "--headphones" => headphones = true,
                 "--no-aec" => no_aec = true,
+                "--vpio" => vpio = true,
                 "--simulate" => {
                     let path = match it.peek() {
                         Some(p) if !p.starts_with("--") => PathBuf::from(it.next().unwrap()),
@@ -149,6 +152,7 @@ impl Args {
             output_device,
             headphones,
             no_aec,
+            vpio,
             simulate,
             seconds,
         })
@@ -167,7 +171,7 @@ fn print_usage() {
         "usage: buzztalkd --relay <wss://...> --channel <uuid> \\\n\
          \x20         --agent-pubkey <hex-or-npub> [--agent-pubkey ...] \\\n\
          \x20         [--key-env VAR | --key-file PATH] \\\n\
-         \x20         [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N] \\\n\
+         \x20         [--headphones] [--no-aec] [--vpio] [--simulate [PATH]] [--seconds N] \\\n\
          \x20         [--quiet-period-ms N]\n\
          \x20      buzztalkd --download-models\n\
          \x20      buzztalkd --model-status\n\n\
@@ -238,6 +242,13 @@ fn main() {
              whether AEC itself is the thing breaking your setup."
         );
     }
+    if args.vpio {
+        println!(
+            "  --vpio: using macOS VoiceProcessingIO for capture+render \
+             (fixes Bluetooth headsets starving the microphone to silence \
+             under two independent cpal streams; macOS only)"
+        );
+    }
     println!();
 
     let agent = match BuzzAgent::connect(buzz_config) {
@@ -258,7 +269,7 @@ fn main() {
         agent: Box::new(agent),
         no_aec: args.no_aec,
         endpoint_silence_ms: args.endpoint_silence_ms,
-        ..Default::default()
+        use_voice_processing: args.vpio,
     };
 
     let pipeline = match ConversationPipeline::start(pipeline_config) {

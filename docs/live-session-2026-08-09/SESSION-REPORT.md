@@ -150,3 +150,31 @@ speaking from loudspeakers by talking over it — is now proven.
 
 Session grand total: eleven deliberate barge-ins across headphone-gated
 and open-loudspeaker paths, 7.2-43.0 ms.
+
+## Late morning: VoiceProcessingIO engine — full-duplex Bluetooth WORKS
+
+The fix direction named above was built and validated the same day. A new
+macOS engine mode (`--vpio`) runs capture and render as ONE
+`VoiceProcessingIO` audio unit instead of two independent cpal streams,
+with the same bit-exact render-reference tap so sonora and the ERLE
+barge-in gate keep working on top of Apple's voice processing.
+
+Validated live on the WH-CH720N carrying BOTH directions — the exact
+configuration that was pure digital silence under the two-stream engine:
+
+- Transcription word-perfect, including two consecutive clean cold starts
+  after 15-minute gaps ("Can you hear me now at eleven twenty eight AM",
+  complete from the first word) — Apple's session management also appears
+  to hold the Bluetooth capture path warm, collapsing the front-clipping
+  problem.
+- Agent replies audible in-ear (user confirmed).
+- Barge-in through the VPIO path: 20.0 ms.
+
+Two more product fixes shipped from live findings: punctuation-only
+transcripts (a lone ".") are now refused before signing — the agent
+itself reported receiving one — and an empty final decode now falls back
+to the best streaming partial (observed: partials read "at eleven sixteen
+AM", the finalize pass returned blank; the partial is strictly better).
+
+This closes the wireless-first gap. Remaining launch gate: the 15-second
+video.

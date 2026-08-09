@@ -3,7 +3,7 @@
 //! the session machine, [`EchoAgent`], TTS, and playback, with barge-in.
 //!
 //! ```text
-//! buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]
+//! buzztalk-demo [--headphones] [--no-aec] [--vpio] [--simulate [PATH]] [--seconds N]
 //! buzztalk-demo --download-models
 //! buzztalk-demo --model-status
 //! ```
@@ -25,6 +25,10 @@
 //!   real echo suppression to measure, the barge-in gate has nothing to
 //!   check before trusting a candidate, so it becomes far more
 //!   trigger-happy on ordinary playback bleed.
+//! * `--vpio` (macOS only) uses `VoiceProcessingIO` instead of `DuplexEngine`'s
+//!   two independent `cpal` streams -- fixes a Bluetooth headset's
+//!   microphone being starved to digital silence by two uncoordinated
+//!   CoreAudio clients. See `PipelineConfig::use_voice_processing`'s docs.
 //! * `--simulate [PATH]` replaces live microphone capture with audio
 //!   decoded from a WAV file, paced to real time as if it were the
 //!   microphone. Defaults to the Parakeet test fixture shipped with the
@@ -52,6 +56,7 @@ use buzztalk_pipeline::{
 fn main() {
     let mut headphones = false;
     let mut no_aec = false;
+    let mut vpio = false;
     let mut simulate: Option<PathBuf> = None;
     let mut seconds: u64 = 30;
     let mut download_models = false;
@@ -62,6 +67,7 @@ fn main() {
         match arg.as_str() {
             "--headphones" => headphones = true,
             "--no-aec" => no_aec = true,
+            "--vpio" => vpio = true,
             "--simulate" => {
                 let path = match args.peek() {
                     Some(p) if !p.starts_with("--") => PathBuf::from(args.next().unwrap()),
@@ -124,6 +130,13 @@ fn main() {
              is the thing breaking your setup, not for normal use."
         );
     }
+    if vpio {
+        println!(
+            "  --vpio: using macOS VoiceProcessingIO for capture+render \
+             (fixes Bluetooth headsets starving the microphone to silence \
+             under two independent cpal streams; macOS only)"
+        );
+    }
     println!();
 
     let config = PipelineConfig {
@@ -131,6 +144,7 @@ fn main() {
         simulate_capture: simulate,
         agent: Box::new(EchoAgent::new()),
         no_aec,
+        use_voice_processing: vpio,
         ..Default::default()
     };
 
@@ -214,7 +228,7 @@ fn main() {
 
 fn print_usage() {
     println!(
-        "usage: buzztalk-demo [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]\n\
+        "usage: buzztalk-demo [--headphones] [--no-aec] [--vpio] [--simulate [PATH]] [--seconds N]\n\
          \x20         [--download-models] [--model-status]"
     );
 }

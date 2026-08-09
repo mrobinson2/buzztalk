@@ -59,6 +59,34 @@ const DEVICE_CHECK_INTERVAL: Duration = Duration::from_millis(1000);
 /// disappears or renegotiates its format. `None` in simulate mode.
 type EngineFactory = Box<dyn Fn() -> buzztalk_core::Result<Box<dyn AudioEngine>> + Send>;
 
+/// Open the audio engine `PipelineConfig` asked for: `VoiceProcessingIO`
+/// when `use_voice_processing` is set (macOS only -- see
+/// [`PipelineConfig::use_voice_processing`]'s docs for the non-macOS
+/// behaviour), `DuplexEngine` otherwise. Shared by [`ConversationPipeline::start`]
+/// and the [`EngineFactory`] closure the device watchdog rebuilds through,
+/// so a live rebuild can never silently switch engines mid-session.
+fn open_engine(
+    duplex: DuplexConfig,
+    use_voice_processing: bool,
+) -> buzztalk_core::Result<Box<dyn AudioEngine>> {
+    if use_voice_processing {
+        #[cfg(target_os = "macos")]
+        {
+            return buzztalk_audio::VoiceProcessingEngine::start(duplex)
+                .map(|e| Box::new(e) as Box<dyn AudioEngine>);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(buzztalk_core::Error::Device(
+                "PipelineConfig::use_voice_processing requires macOS -- VoiceProcessingIO is a \
+                 macOS-only CoreAudio unit; use the default DuplexEngine path on this platform"
+                    .to_string(),
+            ));
+        }
+    }
+    DuplexEngine::start(duplex).map(|e| Box::new(e) as Box<dyn AudioEngine>)
+}
+
 /// Which halves of [`buzztalk_audio::default_devices_signature`] the device
 /// watchdog should react to -- a direction pinned to an explicit device in
 /// [`DuplexConfig`] ignores changes to the host default for that direction.
@@ -111,6 +139,25 @@ pub struct PipelineConfig {
     /// (2026-08-09) showed 300 ms splits thinking-aloud sentences into
     /// separate turns; ~1000 ms suits conversational speech.
     pub endpoint_silence_ms: Option<u64>,
+    /// Use macOS's `VoiceProcessingIO` audio unit instead of `DuplexEngine`'s
+    /// two independent `cpal` streams. Opening separate `cpal` input and
+    /// output streams on a Bluetooth headset starves its microphone to
+    /// digital silence -- two independent CoreAudio clients each grabbing
+    /// a half of the same Bluetooth device don't coordinate the handset's
+    /// HFP profile the way asking for both directions from one client does
+    /// (measured; see `docs/live-session-2026-08-09/SESSION-REPORT.md`
+    /// "duplex-on-BT"). `VoiceProcessingIO` runs capture and render as one
+    /// audio session and handles Bluetooth correctly.
+    ///
+    /// **macOS only.** On every other platform, setting this `true`
+    /// doesn't fail to compile -- it fails [`ConversationPipeline::start`]
+    /// with a clear [`PipelineError`] instead, so a cross-platform caller
+    /// can gate this behind a flag without needing its own `cfg`.
+    /// Defaults to `false` (the existing `DuplexEngine` path). Ignored
+    /// when [`Self::simulate_capture`] is set: simulate mode replaces
+    /// capture with WAV-sourced frames regardless of which engine renders
+    /// playback, and `DuplexEngine` is the better-exercised path for that.
+    pub use_voice_processing: bool,
 }
 
 impl Default for PipelineConfig {
@@ -122,6 +169,7 @@ impl Default for PipelineConfig {
             agent: Box::new(EchoAgent::new()),
             no_aec: false,
             endpoint_silence_ms: None,
+            use_voice_processing: false,
         }
     }
 }
@@ -284,9 +332,17 @@ impl ConversationPipeline {
             agent,
             no_aec,
             endpoint_silence_ms,
+            use_voice_processing,
         } = config;
 
-        let engine: Box<dyn AudioEngine> = Box::new(DuplexEngine::start(duplex.clone())?);
+        // Simulate mode replaces capture with WAV-sourced frames regardless
+        // of which engine renders playback -- `DuplexEngine` is the
+        // better-exercised path for that, so VPIO is only actually used
+        // when both are requested. See `PipelineConfig::use_voice_processing`'s
+        // docs.
+        let use_voice_processing = use_voice_processing && simulate_capture.is_none();
+
+        let engine: Box<dyn AudioEngine> = open_engine(duplex.clone(), use_voice_processing)?;
         // Real devices come and go (and Bluetooth headsets renegotiate
         // formats under a running stream) -- keep the recipe for opening
         // the engine so the orchestrator can rebuild it live. Simulate
@@ -302,9 +358,7 @@ impl ConversationPipeline {
         };
         let engine_factory: Option<EngineFactory> = simulate_capture.is_none().then(|| {
             let cfg = duplex;
-            Box::new(move || {
-                DuplexEngine::start(cfg.clone()).map(|e| Box::new(e) as Box<dyn AudioEngine>)
-            }) as EngineFactory
+            Box::new(move || open_engine(cfg.clone(), use_voice_processing)) as EngineFactory
         });
         let device_signature = simulate_capture
             .is_none()

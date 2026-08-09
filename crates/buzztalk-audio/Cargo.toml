@@ -18,3 +18,5 @@ ringbuf = "0.5"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "objc2", "AudioHardware"] }
 objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "objc2"] }
+coreaudio-rs = "0.14"
+objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AUComponent", "AudioUnitProperties", "AudioOutputUnit", "AudioComponent"] }

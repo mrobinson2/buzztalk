@@ -46,6 +46,17 @@ pub fn build_stream_message(
             "content must not be empty".to_string(),
         ));
     }
+    // A recognizer fed near-silence sometimes emits a lone "." or "?" --
+    // technically non-empty, but publishing it spams the channel and makes
+    // agents respond to nothing. (Found live 2026-08-09: the agent itself
+    // reported receiving a message that was "only a period".) Require at
+    // least one alphanumeric character before a submission is worth a
+    // signature.
+    if !content.chars().any(|c| c.is_alphanumeric()) {
+        return Err(BuzzError::EventBuild(
+            "content has no alphanumeric characters (punctuation-only transcript)".to_string(),
+        ));
+    }
     if content.len() > MAX_CONTENT_BYTES {
         return Err(BuzzError::EventBuild(format!(
             "content exceeds maximum size of {MAX_CONTENT_BYTES} bytes (got {})",

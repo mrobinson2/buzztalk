@@ -90,27 +90,54 @@ impl SttWorker {
         let handle = thread::Builder::new()
             .name("buzztalk-stt".into())
             .spawn(move || {
+                // Best interim hypothesis for the utterance in progress.
+                // The finalize pass re-decodes the whole buffered
+                // utterance, and on audio that is mostly device-wake
+                // garbage with a clean tail it can return *empty* even
+                // though streaming partials caught real words (observed
+                // live 2026-08-09: partials read "at eleven sixteen AM",
+                // final came back blank). A words-seen-then-discarded final
+                // is strictly worse than the best partial, so keep the
+                // partial as a fallback.
+                let mut best_partial = String::new();
                 for request in request_rx {
                     match request {
                         SttRequest::PushAudio { turn, samples } => {
                             if let Ok(Some(Transcript::Partial { text, .. })) =
                                 recognizer.push_audio(&samples)
                             {
+                                if text.chars().any(|c| c.is_alphanumeric()) {
+                                    best_partial = text.clone();
+                                }
                                 if result_tx.send(SttResult::Partial { turn, text }).is_err() {
                                     return;
                                 }
                             }
                         }
                         SttRequest::FinishUtterance { turn } => {
-                            if let Ok(Some(Transcript::Final { text })) =
-                                recognizer.finish_utterance()
-                            {
-                                if result_tx.send(SttResult::Final { turn, text }).is_err() {
-                                    return;
+                            let final_text = match recognizer.finish_utterance() {
+                                Ok(Some(Transcript::Final { text }))
+                                    if text.chars().any(|c| c.is_alphanumeric()) =>
+                                {
+                                    text
                                 }
+                                _ => std::mem::take(&mut best_partial),
+                            };
+                            best_partial.clear();
+                            if result_tx
+                                .send(SttResult::Final {
+                                    turn,
+                                    text: final_text,
+                                })
+                                .is_err()
+                            {
+                                return;
                             }
                         }
-                        SttRequest::Reset => recognizer.reset(),
+                        SttRequest::Reset => {
+                            best_partial.clear();
+                            recognizer.reset();
+                        }
                     }
                 }
             })
@@ -292,13 +319,23 @@ mod tests {
     }
 
     #[test]
-    fn finish_with_no_audio_pushed_yields_nothing() {
+    fn finish_with_no_audio_pushed_yields_an_empty_final() {
+        // A finish always answers with a Final now -- empty when neither
+        // the finalize pass nor any partial ever saw a word -- so the
+        // session machine gets a prompt turn boundary instead of waiting
+        // out FINALIZE_TIMEOUT on a turn that will never produce text.
         let worker = SttWorker::spawn_with(FakeRecognizer {
             pushed_word_count: 0,
         });
         let turn = a_turn();
         worker.finish_utterance(turn);
-        assert!(recv_within(&worker, Duration::from_millis(200)).is_none());
+        match recv_within(&worker, Duration::from_millis(200)) {
+            Some(SttResult::Final { turn: t, text }) => {
+                assert_eq!(t, turn);
+                assert!(text.is_empty(), "expected empty fallback, got {text:?}");
+            }
+            other => panic!("expected an empty Final, got {:?}", other.is_some()),
+        }
     }
 
     #[test]
