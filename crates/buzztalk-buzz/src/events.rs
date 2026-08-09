@@ -76,6 +76,32 @@ pub fn build_stream_message(
     Ok(EventBuilder::new(Kind::Custom(KIND_STREAM_MESSAGE), content).tags(tags))
 }
 
+/// The "listening" acknowledgement BuzzTalk reacts with the instant it
+/// publishes a spoken message — the voice equivalent of the eyes reaction
+/// the desktop app shows when an agent picks up a typed message. Because
+/// `buzztalkd` signs as the user, this is the user's own client confirming
+/// "captured and posted," not an agent — but it lands immediately, before
+/// any agent round-trip.
+pub const LISTENING_REACTION: &str = "👀";
+
+/// Build a NIP-25 reaction (`kind:7`) to `target_event` in `channel_id`.
+/// `content` is the emoji. The reaction e-tags the target and h-tags the
+/// channel so it lands in the same NIP-29 group; `target_author` is p-tagged
+/// per NIP-25.
+pub fn build_reaction(
+    channel_id: Uuid,
+    target_event: &nostr::event::EventId,
+    target_author: &PublicKey,
+    content: &str,
+) -> Result<EventBuilder, BuzzError> {
+    let tags = vec![
+        tag(&["h", &channel_id.to_string()])?,
+        tag(&["e", &target_event.to_hex()])?,
+        tag(&["p", &target_author.to_hex()])?,
+    ];
+    Ok(EventBuilder::new(Kind::Custom(7), content).tags(tags))
+}
+
 /// Parse a tag, mapping the (infallible-in-practice, since every caller
 /// here supplies non-empty literal slices) error the same way
 /// `buzz-sdk::builders::tag` does.

@@ -277,8 +277,31 @@ fn publish(socket: &mut Socket, config: &BuzzConfig, keys: &Keys, text: &str) {
             return;
         }
     };
+    let message_id = event.id;
+    let author = event.pubkey;
     if let Err(e) = send(socket, ClientMessage::event(event)) {
         eprintln!("buzztalk-buzz: failed to publish turn submission: {e}");
+        return;
+    }
+
+    // Immediately react 👀 to the just-published message so the channel
+    // shows the spoken message was captured and posted, without waiting on
+    // an agent round-trip -- the voice analogue of the app's eyes
+    // reaction. Best-effort: a failed reaction never fails the turn.
+    match events::build_reaction(
+        config.channel_id,
+        &message_id,
+        &author,
+        events::LISTENING_REACTION,
+    )
+    .and_then(|b| sign(b, keys).map_err(|e| crate::error::BuzzError::EventBuild(e.to_string())))
+    {
+        Ok(reaction) => {
+            if let Err(e) = send(socket, ClientMessage::event(reaction)) {
+                eprintln!("buzztalk-buzz: listening reaction not sent: {e}");
+            }
+        }
+        Err(e) => eprintln!("buzztalk-buzz: could not build listening reaction: {e}"),
     }
 }
 
