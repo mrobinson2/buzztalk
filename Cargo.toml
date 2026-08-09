@@ -9,6 +9,7 @@ members = [
     "crates/buzztalk-stt",
     "crates/buzztalk-session",
     "crates/buzztalk-tts",
+    "crates/buzztalk-pipeline",
 ]
 
 [workspace.package]
@@ -27,4 +28,5 @@ buzztalk-vad = { path = "crates/buzztalk-vad" }
 buzztalk-stt = { path = "crates/buzztalk-stt" }
 buzztalk-session = { path = "crates/buzztalk-session" }
 buzztalk-tts = { path = "crates/buzztalk-tts" }
+buzztalk-pipeline = { path = "crates/buzztalk-pipeline" }
 thiserror = "2"

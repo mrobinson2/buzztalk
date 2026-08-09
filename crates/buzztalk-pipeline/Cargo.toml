@@ -1,0 +1,22 @@
+[package]
+name = "buzztalk-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Conversation orchestration for BuzzTalk: owns the threads, wires AEC/VAD gating, and acts on every SessionMachine Output end to end"
+
+[dependencies]
+buzztalk-core.workspace = true
+buzztalk-audio.workspace = true
+buzztalk-aec.workspace = true
+buzztalk-vad.workspace = true
+buzztalk-stt.workspace = true
+buzztalk-tts.workspace = true
+buzztalk-session.workspace = true
+thiserror.workspace = true
+hound = "3"
+
+[[bin]]
+name = "buzztalk-demo"
+path = "src/bin/demo.rs"
