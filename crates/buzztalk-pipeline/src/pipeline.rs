@@ -60,6 +60,21 @@ const DEVICE_CHECK_INTERVAL: Duration = Duration::from_millis(1000);
 /// capture stream itself has gone bad (see `handle_stt_result`).
 const DEAD_CAPTURE_EMPTY_FINALS: u32 = 3;
 
+/// Whether a final transcript is word-bearing enough to clear the
+/// dead-capture watchdog's consecutive-wordless-turn counter.
+///
+/// At least two alphanumeric characters are required. A heavily attenuated
+/// capture stream (seen live 2026-08-09: a Bluetooth headset on its
+/// charger delivering speech at ~-54 dBFS peak) doesn't go fully wordless
+/// -- the loudest phoneme of each utterance still squeaks through as a
+/// single-letter final ("H", "U", "I"). Treating those as words kept
+/// resetting the counter, so the watchdog never fired and the session
+/// stayed stuck in the degraded state. Real one-word answers ("No", "Hi",
+/// "Yes") all have two or more alphanumeric characters and still clear it.
+fn final_clears_dead_capture(text: &str) -> bool {
+    text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+}
+
 /// The recipe for reopening the audio engine on the current default
 /// devices, kept by the orchestrator so it can rebuild live when a device
 /// disappears or renegotiates its format. `None` in simulate mode.
@@ -1051,17 +1066,22 @@ impl Orchestrator {
                 if self.session.is_current(turn) {
                     self.metrics.mark_final_transcript();
                 }
-                // Dead-capture watchdog. A final with no alphanumeric
-                // content that nonetheless closed a real speech turn means
-                // the endpointer heard energy but the recognizer got no
-                // words -- the signature of a Bluetooth capture stream that
-                // has silently gone bad (rate renegotiated under us, or the
-                // headset's mic link dropped) while still delivering frames,
-                // so neither the stream-error nor device-signature nor
-                // stall triggers fire. A run of these means rebuild the
-                // engine; a single one is just a cough or a false VAD
-                // trigger and is ignored. A word-bearing final clears it.
-                if text.chars().any(|c| c.is_alphanumeric()) {
+                // Dead-capture watchdog. A final with (nearly) no
+                // alphanumeric content that nonetheless closed a real
+                // speech turn means the endpointer heard energy but the
+                // recognizer got no words -- the signature of a Bluetooth
+                // capture stream that has silently gone bad (rate
+                // renegotiated under us, the headset's mic link dropped, or
+                // -- seen live 2026-08-09 -- the stream heavily attenuated
+                // by the headset being on its charger) while still
+                // delivering frames, so neither the stream-error nor
+                // device-signature nor stall triggers fire. A run of these
+                // means rebuild the engine; a single one is just a cough or
+                // a false VAD trigger and is ignored. Only a word-bearing
+                // final clears it -- see [`final_clears_dead_capture`] for
+                // why single-letter fragments ("H", "U") do NOT count as
+                // words here.
+                if final_clears_dead_capture(&text) {
                     self.consecutive_empty_finals = 0;
                 } else {
                     self.consecutive_empty_finals += 1;
@@ -1389,6 +1409,28 @@ mod tests {
     //! not something owned or fixable from this crate.
 
     use super::*;
+
+    #[test]
+    fn single_letter_fragments_do_not_clear_the_dead_capture_watchdog() {
+        // The attenuated-capture signature seen live 2026-08-09: only the
+        // loudest phoneme survives, one letter per turn.
+        for fragment in ["H", "U", "I", "Y.", "a", ""] {
+            assert!(
+                !final_clears_dead_capture(fragment),
+                "{fragment:?} must count as a wordless turn"
+            );
+        }
+    }
+
+    #[test]
+    fn real_words_clear_the_dead_capture_watchdog() {
+        for words in ["No", "Hi", "Yes.", "You", "Thank.", "ok", "42"] {
+            assert!(
+                final_clears_dead_capture(words),
+                "{words:?} must clear the wordless-turn counter"
+            );
+        }
+    }
 
     #[test]
     #[ignore = "requires the real Parakeet + Pocket TTS models on disk; segfaults today, see module docs"]
