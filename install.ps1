@@ -88,8 +88,10 @@ try {
     Expand-Archive -Path $archivePath -DestinationPath $payload
     $daemon = Join-Path $payload 'buzztalkd.exe'
     $demo = Join-Path $payload 'buzztalk-demo.exe'
+    $gateway = Join-Path $payload 'buzztalk-gateway.ps1'
     if (-not (Test-Path -PathType Leaf $daemon)) { Fail 'release archive is missing buzztalkd.exe' }
     if (-not (Test-Path -PathType Leaf $demo)) { Fail 'release archive is missing buzztalk-demo.exe' }
+    if (-not (Test-Path -PathType Leaf $gateway)) { Fail 'release archive is missing buzztalk-gateway.ps1' }
 
     # Move-Item on the same volume replaces each executable by rename. Keep
     # recoverable copies until the complete pair is installed so a failure
@@ -97,10 +99,12 @@ try {
     $destinations = @{
         'buzztalkd.exe' = Join-Path $installDir 'buzztalkd.exe'
         'buzztalk-demo.exe' = Join-Path $installDir 'buzztalk-demo.exe'
+        'buzztalk-gateway.ps1' = Join-Path $installDir 'buzztalk-gateway.ps1'
     }
     $sources = @{
         'buzztalkd.exe' = $daemon
         'buzztalk-demo.exe' = $demo
+        'buzztalk-gateway.ps1' = $gateway
     }
     $backup = Join-Path $stageDir 'backup'
     New-Item -ItemType Directory -Path $backup | Out-Null
@@ -113,7 +117,7 @@ try {
     $transactionStarted = $true
     $committed = $false
     try {
-        foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe')) {
+        foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe', 'buzztalk-gateway.ps1')) {
             Move-Item -Force -Path $sources[$binary] -Destination $destinations[$binary]
         }
         $committed = $true
@@ -122,7 +126,7 @@ try {
         throw "could not replace the complete executable set; the previous installation was restored: $replacementError"
     } finally {
         if ($transactionStarted -and -not $committed) {
-            foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe')) {
+            foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe', 'buzztalk-gateway.ps1')) {
                 # A same-volume rename removes the staged source. If it is
                 # still present, that executable was never replaced.
                 if (Test-Path -PathType Leaf $sources[$binary]) {
@@ -139,6 +143,8 @@ try {
     }
 
     Write-Host "Installed BuzzTalk $version to $installDir"
+    Write-Host 'Gateway helper installed as buzztalk-gateway.ps1. Run it with: powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\BuzzTalk\bin\buzztalk-gateway.ps1" configure'
+    Write-Host 'The ExecutionPolicy Bypass applies only to that invocation; persistent policy was not changed.'
     Write-Host 'Speech models were not downloaded. Model download remains opt-in via buzztalkd --download-models.'
 } catch {
     Fail $_.Exception.Message

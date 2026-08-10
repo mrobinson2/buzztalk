@@ -37,7 +37,13 @@ make_unix_release() {
     printf '#!/bin/sh\nprintf "%%s\\n" "%s-demo"\n' "$marker" > "$payload/buzztalk-demo"
     chmod +x "$payload/buzztalkd" "$payload/buzztalk-demo"
     archive="buzztalk-$target.tar.gz"
-    tar -czf "$release_dir/$archive" -C "$payload" buzztalkd buzztalk-demo
+    if [ "$target" = macos-arm64 ] || [ "$target" = macos-x86_64 ]; then
+        cp "$ROOT/scripts/buzztalk-gateway" "$payload/buzztalk-gateway"
+        chmod +x "$payload/buzztalk-gateway"
+        tar -czf "$release_dir/$archive" -C "$payload" buzztalkd buzztalk-demo buzztalk-gateway
+    else
+        tar -czf "$release_dir/$archive" -C "$payload" buzztalkd buzztalk-demo
+    fi
     hash=$(sha256_file "$release_dir/$archive")
     printf '%s  %s\n' "$hash" "$archive" > "$release_dir/SHA256SUMS"
 }
@@ -67,6 +73,9 @@ test_installs_selected_version_and_is_idempotent() {
 
     [ -x "$install_dir/buzztalkd" ] || return 1
     [ -x "$install_dir/buzztalk-demo" ] || return 1
+    if [ "$target" = macos-arm64 ] || [ "$target" = macos-x86_64 ]; then
+        [ -x "$install_dir/buzztalk-gateway" ] || return 1
+    fi
     [ "$("$install_dir/buzztalkd")" = selected-daemon ] || return 1
     [ "$("$install_dir/buzztalk-demo")" = selected-demo ] || return 1
     [ ! -e "$install_dir/models" ] || return 1
@@ -215,6 +224,28 @@ EOF
     grep -q 'Installed BuzzTalk v9.8.9' "$TMP_ROOT/prerelease.out"
 }
 
+test_macos_installs_matching_gateway_helper() {
+    make_unix_release v9.8.12 macos-arm64 macos-helper
+    fake_bin="$TMP_ROOT/macos-uname-bin"
+    mkdir -p "$fake_bin"
+    cat > "$fake_bin/uname" <<'EOF'
+#!/bin/sh
+case "$1" in
+    -s) echo Darwin ;;
+    -m) echo arm64 ;;
+    *) echo Darwin ;;
+esac
+EOF
+    chmod +x "$fake_bin/uname"
+    install_dir="$TMP_ROOT/macos-helper-bin"
+    PATH="$fake_bin:$PATH" \
+        BUZZTALK_VERSION=v9.8.12 \
+        BUZZTALK_INSTALL_DIR="$install_dir" \
+        BUZZTALK_RELEASE_BASE_URL="file://$TMP_ROOT/releases" \
+        sh "$ROOT/install.sh" >"$TMP_ROOT/macos-helper.out" 2>"$TMP_ROOT/macos-helper.err" || return 1
+    [ -x "$install_dir/buzztalk-gateway" ]
+}
+
 test_unsupported_platform_is_clear() {
     fake_bin="$TMP_ROOT/fake-bin"
     mkdir -p "$fake_bin"
@@ -235,6 +266,7 @@ EOF
 
 run_test 'selected version installs both binaries and reruns safely' test_installs_selected_version_and_is_idempotent
 run_test 'unset version installs prerelease with per-archive checksum' test_unset_version_installs_newest_prerelease
+run_test 'macOS installs the matching gateway helper' test_macos_installs_matching_gateway_helper
 run_test 'checksum failure keeps the previous installation' test_checksum_failure_preserves_existing_install
 run_test 'second replacement failure rolls back the first binary' test_second_replacement_failure_rolls_back_first_binary
 run_test 'signal after first replacement restores both binaries' test_signal_after_first_replacement_restores_both_binaries

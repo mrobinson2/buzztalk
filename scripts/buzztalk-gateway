@@ -1,0 +1,288 @@
+#!/bin/sh
+set -eu
+
+umask 077
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+CONFIG_DIR=${BUZZTALK_GATEWAY_CONFIG_DIR:-"${HOME}/.config/buzztalk"}
+STATE_DIR=${BUZZTALK_GATEWAY_STATE_DIR:-"${HOME}/.local/state/buzztalk"}
+CONFIG_FILE="$CONFIG_DIR/gateway.conf"
+STATE_FILE="$STATE_DIR/gateway.state"
+LOG_FILE="$STATE_DIR/gateway.log"
+
+fail() {
+    message=$1
+    code=${2:-2}
+    printf '%s\n' "$message" >&2
+    exit "$code"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: buzztalk-gateway <configure|on|off|status|toggle|logs>
+EOF
+}
+
+validate_startup_wait() {
+    value=${BUZZTALK_GATEWAY_STARTUP_WAIT_MS:-1000}
+    case "$value" in
+        ''|*[!0-9]*|0) fail 'BUZZTALK_GATEWAY_STARTUP_WAIT_MS must be a positive integer.' 2 ;;
+    esac
+    STARTUP_WAIT_MS=$value
+}
+
+validate_key_file() {
+    key_file=$1
+    if [ ! -f "$key_file" ] || [ ! -r "$key_file" ]; then
+        return 1
+    fi
+    # Opening and closing the descriptor validates readability without
+    # reading, parsing, or displaying a single byte from the key file.
+    # Use a subshell so the descriptor is closed by the shell without
+    # changing the launcher's own descriptor table (and without reading).
+    if (exec 3<"$key_file") 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+parse_config() {
+    [ -f "$CONFIG_FILE" ] || fail 'Configuration not found. Run: buzztalk-gateway configure' 2
+
+    RELAY=''; CHANNEL=''; AGENT_PUBKEY=''; KEY_FILE=''
+    HEADPHONES='false'; ENDPOINT_SILENCE_MS='700'; VPIO='true'
+    seen_relay=0; seen_channel=0; seen_agent=0; seen_key=0
+    seen_headphones=0; seen_silence=0; seen_vpio=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        case "$line" in
+            *=*) key=${line%%=*}; value=${line#*=} ;;
+            *) fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2 ;;
+        esac
+        case "$key" in
+            RELAY) [ "$seen_relay" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_relay=1; RELAY=$value ;;
+            CHANNEL) [ "$seen_channel" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_channel=1; CHANNEL=$value ;;
+            AGENT_PUBKEY) [ "$seen_agent" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_agent=1; AGENT_PUBKEY=$value ;;
+            KEY_FILE) [ "$seen_key" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_key=1; KEY_FILE=$value ;;
+            HEADPHONES) [ "$seen_headphones" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_headphones=1; HEADPHONES=$value ;;
+            ENDPOINT_SILENCE_MS) [ "$seen_silence" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_silence=1; ENDPOINT_SILENCE_MS=$value ;;
+            VPIO) [ "$seen_vpio" -eq 0 ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2; seen_vpio=1; VPIO=$value ;;
+            *) fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2 ;;
+        esac
+    done < "$CONFIG_FILE"
+
+    [ "$seen_relay" -eq 1 ] && [ -n "$RELAY" ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2
+    [ "$seen_channel" -eq 1 ] && [ -n "$CHANNEL" ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2
+    [ "$seen_agent" -eq 1 ] && [ -n "$AGENT_PUBKEY" ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2
+    [ "$seen_key" -eq 1 ] && [ -n "$KEY_FILE" ] || fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2
+    case "$HEADPHONES:$VPIO" in
+        true:true|true:false|false:true|false:false) : ;;
+        *) fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2 ;;
+    esac
+    case "$ENDPOINT_SILENCE_MS" in
+        ''|*[!0-9]*|0) fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2 ;;
+    esac
+    validate_key_file "$KEY_FILE" || fail 'Signing key file is missing or unreadable. Check KEY_FILE and run configure again.' 2
+}
+
+resolve_binary() {
+    if [ -n "${BUZZTALKD_BIN:-}" ]; then
+        BINARY=$BUZZTALKD_BIN
+    elif [ -x "$SCRIPT_DIR/buzztalkd" ]; then
+        BINARY=$SCRIPT_DIR/buzztalkd
+    else
+        BINARY=$(command -v buzztalkd 2>/dev/null || true)
+    fi
+    [ -n "$BINARY" ] && [ -x "$BINARY" ] ||
+        fail 'BuzzTalk gateway executable was not found. Reinstall BuzzTalk or set BUZZTALKD_BIN.' 1
+    BINARY=$(CDPATH='' cd -- "$(dirname -- "$BINARY")" && pwd)/$(basename -- "$BINARY")
+}
+
+read_state() {
+    STATE_PID=''; STATE_EXEC=''; STATE_START=''
+    [ -f "$STATE_FILE" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            PID=*) STATE_PID=${line#PID=} ;;
+            EXECUTABLE=*) STATE_EXEC=${line#EXECUTABLE=} ;;
+            START_TIME=*) STATE_START=${line#START_TIME=} ;;
+        esac
+    done < "$STATE_FILE"
+    [ -n "$STATE_PID" ] && [ -n "$STATE_EXEC" ] && [ -n "$STATE_START" ]
+}
+
+process_start_time() {
+    ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//'
+}
+
+process_command() {
+    ps -o command= -p "$1" 2>/dev/null | sed 's/^ *//'
+}
+
+process_alive() {
+    kill -0 "$1" 2>/dev/null
+}
+
+owned_process() {
+    read_state || return 1
+    process_alive "$STATE_PID" || return 2
+    actual_start=$(process_start_time "$STATE_PID")
+    actual_command=$(process_command "$STATE_PID")
+    [ -n "$actual_start" ] && [ "$actual_start" = "$STATE_START" ] || return 1
+    case "$actual_command" in
+        *"$STATE_EXEC"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+remove_state() {
+    rm -f "$STATE_FILE"
+}
+
+write_state() {
+    mkdir -p "$STATE_DIR"
+    chmod 700 "$STATE_DIR" 2>/dev/null || true
+    temp_state=$(mktemp "$STATE_DIR/.gateway.state.XXXXXX") ||
+        fail 'Could not record gateway state. Run: buzztalk-gateway status' 1
+    {
+        printf 'PID=%s\n' "$1"
+        printf 'EXECUTABLE=%s\n' "$2"
+        printf 'START_TIME=%s\n' "$3"
+    } > "$temp_state"
+    chmod 600 "$temp_state" 2>/dev/null || true
+    mv -f "$temp_state" "$STATE_FILE"
+}
+
+on_gateway() {
+    parse_config
+    resolve_binary
+    if [ -f "$STATE_FILE" ]; then
+        if owned_process; then
+            printf 'BuzzTalk gateway is already running (PID %s).\n' "$STATE_PID"
+            return 0
+        fi
+        if read_state && process_alive "$STATE_PID"; then
+            fail "Refusing to start because recorded gateway ownership could not be verified. Run: buzztalk-gateway status" 1
+        fi
+        remove_state
+    fi
+    mkdir -p "$STATE_DIR"
+    chmod 700 "$STATE_DIR" 2>/dev/null || true
+    : >> "$LOG_FILE"
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+    # Rebuild positional parameters so each config value stays one argument.
+    set -- --relay "$RELAY" --channel "$CHANNEL" --agent-pubkey "$AGENT_PUBKEY" \
+        --key-file "$KEY_FILE" --endpoint-silence-ms "$ENDPOINT_SILENCE_MS"
+    [ "$HEADPHONES" = true ] && set -- "$@" --headphones
+    [ "$VPIO" = true ] && set -- "$@" --vpio
+    nohup "$BINARY" "$@" >> "$LOG_FILE" 2>&1 &
+    pid=$!
+    start_time=$(process_start_time "$pid")
+    [ -n "$start_time" ] || start_time=$(date '+%a %b %e %H:%M:%S %Y')
+    write_state "$pid" "$BINARY" "$start_time"
+    sleep_seconds=$(printf '%d.%03d' $((STARTUP_WAIT_MS / 1000)) $((STARTUP_WAIT_MS % 1000)))
+    sleep "$sleep_seconds"
+    if ! process_alive "$pid" || [ "$(process_start_time "$pid")" != "$start_time" ]; then
+        remove_state
+        fail 'BuzzTalk failed during startup. Run: buzztalk-gateway logs' 1
+    fi
+    printf 'BuzzTalk gateway is running (PID %s). Run: buzztalk-gateway logs to view logs.\n' "$pid"
+}
+
+status_gateway() {
+    if ! read_state; then
+        printf 'BuzzTalk gateway is stopped.\n'
+        return 3
+    fi
+    if owned_process; then
+        printf 'BuzzTalk gateway is running (PID %s).\n' "$STATE_PID"
+        return 0
+    fi
+    if process_alive "$STATE_PID"; then
+        printf 'Refusing to report PID %s as owned. Run: buzztalk-gateway status\n' "$STATE_PID" >&2
+        return 1
+    fi
+    remove_state
+    printf 'BuzzTalk gateway has stale state and is stopped. Run: buzztalk-gateway on\n'
+    return 3
+}
+
+off_gateway() {
+    if ! read_state; then
+        printf 'BuzzTalk gateway is already stopped.\n'
+        return 0
+    fi
+    if ! owned_process; then
+        if ! process_alive "$STATE_PID"; then
+            remove_state
+            printf 'BuzzTalk gateway is stopped.\n'
+            return 0
+        fi
+        fail "Refusing to stop PID $STATE_PID because ownership could not be verified. Run: buzztalk-gateway status" 1
+    fi
+    kill -TERM "$STATE_PID" 2>/dev/null || true
+    attempts=0
+    while process_alive "$STATE_PID" && [ "$attempts" -lt 50 ]; do
+        sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    if process_alive "$STATE_PID"; then
+        kill -KILL "$STATE_PID" 2>/dev/null || true
+    fi
+    remove_state
+    printf 'BuzzTalk gateway is stopped.\n'
+}
+
+configure_gateway() {
+    if [ -e "$CONFIG_FILE" ]; then
+        [ -t 0 ] || fail 'Configuration already exists. Run: buzztalk-gateway status' 2
+        printf 'Configuration already exists. Replace it? [y/N] '
+        IFS= read -r answer || answer=''
+        case "$answer" in y|Y) : ;; *) printf '%s\n' 'Configuration unchanged.'; return 0 ;; esac
+    else
+        [ -t 0 ] || fail 'Configuration not found. Run configure interactively.' 2
+    fi
+    printf 'Relay URL: '; IFS= read -r relay
+    printf 'Channel UUID: '; IFS= read -r channel
+    printf 'Agent public key: '; IFS= read -r agent_pubkey
+    printf 'Signing-key file path: '; IFS= read -r key_file
+    validate_key_file "$key_file" || fail 'Signing key file is missing or unreadable. Check KEY_FILE and run configure again.' 2
+    printf 'Use headphones? [y/N] '; IFS= read -r headphones_answer || headphones_answer=''
+    printf 'Endpoint silence in ms [700]: '; IFS= read -r silence || silence=''
+    [ -n "$silence" ] || silence=700
+    printf 'Enable VoiceProcessingIO? [Y/n] '; IFS= read -r vpio_answer || vpio_answer=''
+    case "$headphones_answer" in y|Y) headphones=true ;; *) headphones=false ;; esac
+    case "$vpio_answer" in n|N) vpio=false ;; *) vpio=true ;; esac
+    case "$silence" in ''|*[!0-9]*|0) fail 'Invalid gateway configuration. Run: buzztalk-gateway configure' 2 ;; esac
+    mkdir -p "$CONFIG_DIR"
+    chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+    temp_config=$(mktemp "$CONFIG_DIR/.gateway.conf.XXXXXX") || fail 'Could not write gateway configuration.' 1
+    {
+        printf 'RELAY=%s\nCHANNEL=%s\nAGENT_PUBKEY=%s\nKEY_FILE=%s\n' "$relay" "$channel" "$agent_pubkey" "$key_file"
+        printf 'HEADPHONES=%s\nENDPOINT_SILENCE_MS=%s\nVPIO=%s\n' "$headphones" "$silence" "$vpio"
+    } > "$temp_config"
+    chmod 600 "$temp_config" 2>/dev/null || true
+    mv -f "$temp_config" "$CONFIG_FILE"
+    printf 'Configuration saved. Run: buzztalk-gateway on\n'
+}
+
+validate_startup_wait
+command=${1:-}
+case "$command" in
+    configure) configure_gateway ;;
+    on) on_gateway ;;
+    off) off_gateway ;;
+    status) status_gateway ;;
+    toggle)
+        if status_gateway >/dev/null 2>&1; then off_gateway; else on_gateway; fi
+        ;;
+    logs)
+        [ -f "$LOG_FILE" ] || fail 'Gateway log is not available. Run: buzztalk-gateway on' 1
+        tail -n 50 -f "$LOG_FILE"
+        ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac

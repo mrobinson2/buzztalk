@@ -28,10 +28,17 @@ jobs:
       - name: Installer behavior tests
         if: runner.os != 'Windows'
         run: tests/installers.sh
+      - name: Gateway launcher tests
+        if: runner.os != 'Windows'
+        run: tests/gateway.sh
       - name: PowerShell installer behavior tests
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./tests/installers.ps1
+      - name: PowerShell gateway launcher tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/gateway.ps1
 
   test:
     name: test (${{ matrix.os }})

@@ -43,14 +43,21 @@ jobs:
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
-          tar czf buzztalk-${{ matrix.target }}.tar.gz -C target/release buzztalk-demo buzztalkd
+          if [ "${{ matrix.target }}" = "macos-arm64" ] || [ "${{ matrix.target }}" = "macos-x86_64" ]; then
+            cp scripts/buzztalk-gateway target/release/buzztalk-gateway
+            chmod +x target/release/buzztalk-gateway
+            tar czf buzztalk-${{ matrix.target }}.tar.gz -C target/release buzztalk-demo buzztalkd buzztalk-gateway
+          else
+            tar czf buzztalk-${{ matrix.target }}.tar.gz -C target/release buzztalk-demo buzztalkd
+          fi
           shasum -a 256 buzztalk-${{ matrix.target }}.tar.gz > buzztalk-${{ matrix.target }}.sha256
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/release/buzztalk-demo.exe,target/release/buzztalkd.exe -DestinationPath buzztalk-${{ matrix.target }}.zip
+          Copy-Item scripts/buzztalk-gateway.ps1 target/release/buzztalk-gateway.ps1
+          Compress-Archive -Path target/release/buzztalk-demo.exe,target/release/buzztalkd.exe,target/release/buzztalk-gateway.ps1 -DestinationPath buzztalk-${{ matrix.target }}.zip
           $name = "buzztalk-${{ matrix.target }}.zip"
           $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name" | Out-File -Encoding ascii "buzztalk-${{ matrix.target }}.sha256"

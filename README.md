@@ -103,14 +103,73 @@ irm https://raw.githubusercontent.com/mrobinson2/buzztalk/main/install.ps1 | iex
 
 The installer resolves the newest non-draft release (including prereleases),
 selects the archive for the current platform, verifies its SHA-256 checksum,
-stages and validates both executables before replacing either one, and restores
-the previous pair if a replacement fails. It never requests administrator
+stages and validates the matching executables plus platform launcher before
+replacing any installed file, and restores the previous set if a replacement
+fails. It never requests administrator
 access, reads a signing key, or downloads speech models. Set `BUZZTALK_VERSION`
 to pin a release and `BUZZTALK_INSTALL_DIR` to override the default
 (`~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\BuzzTalk\bin` on Windows).
 Unsupported operating-system/architecture combinations stop with a diagnostic.
 Review the installer scripts before piping them to a shell if that better fits
 your security policy.
+
+## Turn the audio gateway on or off
+
+The installed gateway helper is the standalone CLI/operator control for the
+`buzztalkd` process. It is separate from the in-process Desktop Audio Bridge;
+neither capability launches, replaces, or serves as a fallback for the other.
+
+Configure once with the existing signing-key file. The helper checks that the
+file is readable without reading or displaying its contents:
+
+macOS:
+
+```bash
+buzztalk-gateway configure
+```
+
+Windows PowerShell:
+
+```powershell
+& "$env:LOCALAPPDATA\BuzzTalk\bin\buzztalk-gateway.ps1" configure
+```
+
+The daily commands need no relay, channel, agent, or key arguments:
+
+```text
+buzztalk-gateway on       # start the installed gateway
+buzztalk-gateway off      # stop only the process this helper owns
+buzztalk-gateway status   # running, stopped, or stale state
+buzztalk-gateway toggle   # switch between on and off
+buzztalk-gateway logs     # explicitly view and follow gateway logs
+```
+
+On Windows, substitute the PowerShell script path for each command. If the
+machine's execution policy blocks the script, use this invocation-scoped
+fallback; it does not change current-user or machine policy:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\BuzzTalk\bin\buzztalk-gateway.ps1" status
+```
+
+The macOS config is `~/.config/buzztalk/gateway.conf`; Windows uses
+`%LOCALAPPDATA%\BuzzTalk\gateway.conf`. Runtime state is under
+`~/.local/state/buzztalk/` on macOS and `%LOCALAPPDATA%\BuzzTalk\state\` on
+Windows. Startup failures direct operators to the explicit `logs` command
+without printing recent log lines; stale state is safe to inspect with
+`status` before recovery.
+
+Gateway logs are unbounded and may contain transcribed conversation text.
+Automatic rotation and truncation are intentionally not part of the helper.
+Operators must apply their own retention policy and rotate or remove logs when
+appropriate. Launcher-generated status and error messages do not contain key
+material, transcripts, channel identifiers, relay URLs, or resolved executable
+paths.
+
+The macOS helper defaults to its configured VoiceProcessingIO route. The
+Windows helper provides process management only. The separate Desktop Audio
+Bridge remains an Apple Silicon macOS-only capability and makes no Windows
+claim.
 
 **2. Fetch the speech models** (~285 MB, one time)
 

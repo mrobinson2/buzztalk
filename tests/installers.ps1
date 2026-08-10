@@ -15,11 +15,13 @@ function New-FakeRelease([string] $Version, [string] $Marker, [bool] $BadChecksu
     New-Item -ItemType Directory -Force -Path $releaseDir, $payload | Out-Null
     Set-Content -Encoding ascii -NoNewline -Path (Join-Path $payload 'buzztalkd.exe') -Value "$Marker-daemon"
     Set-Content -Encoding ascii -NoNewline -Path (Join-Path $payload 'buzztalk-demo.exe') -Value "$Marker-demo"
+    Set-Content -Encoding ascii -NoNewline -Path (Join-Path $payload 'buzztalk-gateway.ps1') -Value "# $Marker gateway helper"
     $archiveName = 'buzztalk-windows-x86_64.zip'
     $archivePath = Join-Path $releaseDir $archiveName
     $payloadFiles = @(
         (Join-Path $payload 'buzztalkd.exe')
         (Join-Path $payload 'buzztalk-demo.exe')
+        (Join-Path $payload 'buzztalk-gateway.ps1')
     )
     Compress-Archive -Path $payloadFiles -DestinationPath $archivePath
     $hash = if ($BadChecksum) { '0' * 64 } else { (Get-FileHash -Algorithm SHA256 $archivePath).Hash.ToLowerInvariant() }
@@ -125,6 +127,7 @@ try {
         if ($result.ExitCode -ne 0) { throw "installer failed: $($result.Output)" }
         if ((Get-Content -Raw (Join-Path $installDir 'buzztalkd.exe')) -ne 'selected-daemon') { throw 'wrong daemon installed' }
         if ((Get-Content -Raw (Join-Path $installDir 'buzztalk-demo.exe')) -ne 'selected-demo') { throw 'wrong demo installed' }
+        if ((Get-Content -Raw (Join-Path $installDir 'buzztalk-gateway.ps1')) -notmatch 'selected gateway helper') { throw 'wrong gateway helper installed' }
         if (Test-Path (Join-Path $installDir 'models')) { throw 'installer downloaded models' }
 
         $rerun = Invoke-Installer -Version 'v9.9.2' -InstallDir $installDir

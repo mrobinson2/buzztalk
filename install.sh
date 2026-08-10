@@ -52,6 +52,10 @@ esac
 install_dir=${BUZZTALK_INSTALL_DIR:-"${HOME}/.local/bin"}
 release_base=${BUZZTALK_RELEASE_BASE_URL:-https://github.com/mrobinson2/buzztalk/releases}
 archive_name="buzztalk-$target.tar.gz"
+install_files="buzztalkd buzztalk-demo"
+if [ "$target" = macos-arm64 ] || [ "$target" = macos-x86_64 ]; then
+    install_files="$install_files buzztalk-gateway"
+fi
 
 if [ -n "${BUZZTALK_VERSION:-}" ]; then
     version=$BUZZTALK_VERSION
@@ -114,7 +118,7 @@ cleanup() {
 replacement_started=0
 rollback_installation() {
     rollback_failed=0
-    for restore_binary in buzztalkd buzztalk-demo; do
+    for restore_binary in $install_files; do
         # A same-filesystem rename removes the staged source. If it is still
         # present, that binary was never replaced and must be left alone.
         if [ -e "$payload/$restore_binary" ]; then
@@ -187,7 +191,7 @@ fi
 
 mkdir "$payload"
 tar -xzf "$archive" -C "$payload" || die "could not extract $archive_name"
-for binary in buzztalkd buzztalk-demo; do
+for binary in $install_files; do
     [ -f "$payload/$binary" ] || die "release archive is missing $binary"
     chmod +x "$payload/$binary"
 done
@@ -197,7 +201,7 @@ done
 # so a failure cannot leave binaries from two different releases.
 backup="$stage_dir/backup"
 mkdir "$backup"
-for binary in buzztalkd buzztalk-demo; do
+for binary in $install_files; do
     if [ -e "$install_dir/$binary" ]; then
         cp -p "$install_dir/$binary" "$backup/$binary" ||
             die "could not back up the existing $binary"
@@ -205,7 +209,7 @@ for binary in buzztalkd buzztalk-demo; do
 done
 
 replacement_started=1
-for binary in buzztalkd buzztalk-demo; do
+for binary in $install_files; do
     if ! mv -f "$payload/$binary" "$install_dir/$binary"; then
         if ! rollback_installation; then
             replacement_started=0
@@ -218,4 +222,7 @@ done
 replacement_started=0
 
 printf 'Installed BuzzTalk %s to %s\n' "$version" "$install_dir"
+if [ "$target" = macos-arm64 ] || [ "$target" = macos-x86_64 ]; then
+    printf '%s\n' 'Gateway helper installed as buzztalk-gateway. Run: buzztalk-gateway configure'
+fi
 printf '%s\n' 'Speech models were not downloaded. Model download remains opt-in via buzztalkd --download-models.'
