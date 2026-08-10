@@ -42,6 +42,37 @@ function Invoke-Installer([AllowNull()][string] $Version, [string] $InstallDir) 
     [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = $output }
 }
 
+function Invoke-InterruptedInstaller([string] $Version, [string] $InstallDir) {
+    $env:BUZZTALK_VERSION = $Version
+    $env:BUZZTALK_INSTALL_DIR = $InstallDir
+    $env:BUZZTALK_RELEASE_BASE_URL = "http://127.0.0.1:$port/releases"
+    $env:BUZZTALK_RELEASE_API_URL = "http://127.0.0.1:$port/releases.json"
+    $harness = Join-Path $tempRoot 'interrupt-installer.ps1'
+    Set-Content -Encoding utf8 -Path $harness -Value @'
+param([string] $Installer)
+$script:moveCount = 0
+function Move-Item {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string[]] $Path,
+        [Parameter(Mandatory = $true)] [string] $Destination,
+        [switch] $Force
+    )
+    $parameters = @{ Path = $Path; Destination = $Destination }
+    if ($Force) { $parameters.Force = $true }
+    Microsoft.PowerShell.Management\Move-Item @parameters
+    $script:moveCount++
+    if ($script:moveCount -eq 1) {
+        throw [System.Management.Automation.PipelineStoppedException]::new()
+    }
+}
+& $Installer
+exit $LASTEXITCODE
+'@
+    $output = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File $harness (Join-Path $root 'install.ps1') 2>&1 | Out-String
+    [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
+
 function Run-Test([string] $Name, [scriptblock] $Body) {
     try {
         & $Body
@@ -147,6 +178,21 @@ try {
         }
         if ((Get-Content -Raw $daemonPath) -ne 'old-daemon') { throw 'daemon was not rolled back' }
         if ((Get-Content -Raw $demoPath) -ne 'old-demo') { throw 'demo changed despite replacement failure' }
+    }
+
+    Run-Test 'pipeline interruption after first replacement restores both binaries' {
+        $installDir = Join-Path $tempRoot 'interrupted'
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        $daemonPath = Join-Path $installDir 'buzztalkd.exe'
+        $demoPath = Join-Path $installDir 'buzztalk-demo.exe'
+        Set-Content -Encoding ascii -NoNewline -Path $daemonPath -Value 'old-daemon'
+        Set-Content -Encoding ascii -NoNewline -Path $demoPath -Value 'old-demo'
+
+        $result = Invoke-InterruptedInstaller -Version 'v9.9.2' -InstallDir $installDir
+
+        if ($result.ExitCode -eq 0) { throw 'installer ignored a pipeline interruption' }
+        if ((Get-Content -Raw $daemonPath) -ne 'old-daemon') { throw 'daemon was not restored after interruption' }
+        if ((Get-Content -Raw $demoPath) -ne 'old-demo') { throw 'demo was not restored after interruption' }
     }
 
     Write-Host "$passed passed; $failed failed"

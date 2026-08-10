@@ -21,7 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: ShellCheck
         if: runner.os == 'Linux'
-        run: shellcheck install.sh tests/installers.sh
+        run: shellcheck install.sh scripts/attach-release.sh tests/installers.sh tests/release-workflow.sh
+      - name: Release attachment tests
+        if: runner.os == 'Linux'
+        run: tests/release-workflow.sh
       - name: Installer behavior tests
         if: runner.os != 'Windows'
         run: tests/installers.sh

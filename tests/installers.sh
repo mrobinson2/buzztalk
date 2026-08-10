@@ -144,6 +144,47 @@ EOF
     [ "$("$install_dir/buzztalk-demo")" = old-demo ]
 }
 
+test_signal_after_first_replacement_restores_both_binaries() {
+    target=$(host_target) || return 1
+    make_unix_release v9.8.11 "$target" interrupted
+    install_dir="$TMP_ROOT/interrupted-bin"
+    mkdir -p "$install_dir"
+    printf '#!/bin/sh\necho old-daemon\n' > "$install_dir/buzztalkd"
+    printf '#!/bin/sh\necho old-demo\n' > "$install_dir/buzztalk-demo"
+    chmod +x "$install_dir/buzztalkd" "$install_dir/buzztalk-demo"
+
+    fake_bin="$TMP_ROOT/interrupting-mv-bin"
+    mkdir -p "$fake_bin"
+    cat > "$fake_bin/mv" <<'EOF'
+#!/bin/sh
+count=0
+if [ -f "$BUZZTALK_MV_COUNT_FILE" ]; then
+    count=$(cat "$BUZZTALK_MV_COUNT_FILE")
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$BUZZTALK_MV_COUNT_FILE"
+"$BUZZTALK_REAL_MV" "$@" || exit $?
+if [ "$count" -eq 1 ]; then
+    kill -TERM "$PPID"
+fi
+EOF
+    chmod +x "$fake_bin/mv"
+
+    real_mv=$(command -v mv)
+    if PATH="$fake_bin:$PATH" \
+        BUZZTALK_REAL_MV="$real_mv" \
+        BUZZTALK_MV_COUNT_FILE="$TMP_ROOT/interrupt-mv-count" \
+        BUZZTALK_VERSION=v9.8.11 \
+        BUZZTALK_INSTALL_DIR="$install_dir" \
+        BUZZTALK_RELEASE_BASE_URL="file://$TMP_ROOT/releases" \
+        sh "$ROOT/install.sh" >"$TMP_ROOT/interrupted.out" 2>"$TMP_ROOT/interrupted.err"; then
+        return 1
+    fi
+
+    [ "$("$install_dir/buzztalkd")" = old-daemon ] || return 1
+    [ "$("$install_dir/buzztalk-demo")" = old-demo ]
+}
+
 test_unset_version_installs_newest_prerelease() {
     target=$(host_target) || return 1
     make_unix_release v9.8.9 "$target" prerelease
@@ -196,6 +237,7 @@ run_test 'selected version installs both binaries and reruns safely' test_instal
 run_test 'unset version installs prerelease with per-archive checksum' test_unset_version_installs_newest_prerelease
 run_test 'checksum failure keeps the previous installation' test_checksum_failure_preserves_existing_install
 run_test 'second replacement failure rolls back the first binary' test_second_replacement_failure_rolls_back_first_binary
+run_test 'signal after first replacement restores both binaries' test_signal_after_first_replacement_restores_both_binaries
 run_test 'unsupported platforms fail with a clear diagnostic' test_unsupported_platform_is_clear
 
 printf '%s passed; %s failed\n' "$passed" "$failed"

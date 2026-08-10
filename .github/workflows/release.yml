@@ -65,6 +65,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -76,4 +77,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+          scripts/attach-release.sh "$TAG" "${{ github.repository }}" dist

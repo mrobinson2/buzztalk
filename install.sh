@@ -111,7 +111,40 @@ stage_dir=$(mktemp -d "$install_dir/.buzztalk-install.XXXXXX") ||
 cleanup() {
     rm -rf "$stage_dir"
 }
-trap cleanup EXIT HUP INT TERM
+replacement_started=0
+rollback_installation() {
+    rollback_failed=0
+    for restore_binary in buzztalkd buzztalk-demo; do
+        # A same-filesystem rename removes the staged source. If it is still
+        # present, that binary was never replaced and must be left alone.
+        if [ -e "$payload/$restore_binary" ]; then
+            continue
+        fi
+        if [ -e "$backup/$restore_binary" ]; then
+            if ! mv -f "$backup/$restore_binary" "$install_dir/$restore_binary"; then
+                rollback_failed=1
+            fi
+        elif ! rm -f "$install_dir/$restore_binary"; then
+            rollback_failed=1
+        fi
+    done
+    return "$rollback_failed"
+}
+handle_signal() {
+    signal_status=$1
+    trap - EXIT HUP INT TERM
+    if [ "$replacement_started" -eq 1 ] && ! rollback_installation; then
+        printf '%s\n' 'buzztalk installer: interrupted; rollback failed' >&2
+    else
+        printf '%s\n' 'buzztalk installer: interrupted; the previous installation was restored' >&2
+    fi
+    cleanup
+    exit "$signal_status"
+}
+trap cleanup EXIT
+trap 'handle_signal 129' HUP
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 
 manifest="$stage_dir/SHA256SUMS"
 archive="$stage_dir/$archive_name"
@@ -171,19 +204,18 @@ for binary in buzztalkd buzztalk-demo; do
     fi
 done
 
+replacement_started=1
 for binary in buzztalkd buzztalk-demo; do
     if ! mv -f "$payload/$binary" "$install_dir/$binary"; then
-        for restore_binary in buzztalkd buzztalk-demo; do
-            if [ -e "$backup/$restore_binary" ]; then
-                mv -f "$backup/$restore_binary" "$install_dir/$restore_binary" ||
-                    die "could not restore $restore_binary after an installation failure"
-            else
-                rm -f "$install_dir/$restore_binary"
-            fi
-        done
+        if ! rollback_installation; then
+            replacement_started=0
+            die "could not replace $binary; rollback also failed"
+        fi
+        replacement_started=0
         die "could not replace $binary; the previous installation was restored"
     fi
 done
+replacement_started=0
 
 printf 'Installed BuzzTalk %s to %s\n' "$version" "$install_dir"
 printf '%s\n' 'Speech models were not downloaded. Model download remains opt-in via buzztalkd --download-models.'

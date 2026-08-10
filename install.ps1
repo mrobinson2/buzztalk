@@ -110,23 +110,32 @@ try {
         }
     }
 
-    $replaced = [Collections.Generic.List[string]]::new()
+    $transactionStarted = $true
+    $committed = $false
     try {
         foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe')) {
             Move-Item -Force -Path $sources[$binary] -Destination $destinations[$binary]
-            $replaced.Add($binary)
         }
+        $committed = $true
     } catch {
         $replacementError = $_.Exception.Message
-        foreach ($binary in $replaced) {
-            $backupPath = Join-Path $backup $binary
-            if (Test-Path -PathType Leaf $backupPath) {
-                Move-Item -Force -Path $backupPath -Destination $destinations[$binary]
-            } else {
-                Remove-Item -Force -ErrorAction SilentlyContinue $destinations[$binary]
+        throw "could not replace the complete executable set; the previous installation was restored: $replacementError"
+    } finally {
+        if ($transactionStarted -and -not $committed) {
+            foreach ($binary in @('buzztalkd.exe', 'buzztalk-demo.exe')) {
+                # A same-volume rename removes the staged source. If it is
+                # still present, that executable was never replaced.
+                if (Test-Path -PathType Leaf $sources[$binary]) {
+                    continue
+                }
+                $backupPath = Join-Path $backup $binary
+                if (Test-Path -PathType Leaf $backupPath) {
+                    Move-Item -Force -Path $backupPath -Destination $destinations[$binary]
+                } else {
+                    Remove-Item -Force -ErrorAction SilentlyContinue $destinations[$binary]
+                }
             }
         }
-        throw "could not replace the complete executable set; the previous installation was restored: $replacementError"
     }
 
     Write-Host "Installed BuzzTalk $version to $installDir"

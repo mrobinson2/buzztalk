@@ -39,16 +39,18 @@ Each archive contains `buzztalkd` and `buzztalk-demo` (with `.exe` suffixes on
 Windows). The workflow uploads a checksum beside every archive and assembles all three
 entries into `SHA256SUMS`, which is what the installers verify.
 
-Create the GitHub release for the tag, then push the tag to start the native build:
+Create and push the tag to start the native build:
 
 ```bash
 git tag -a <version> -m "..."
 git push origin <version>
 ```
 
-The workflow can also be dispatched manually with an existing tag if release assets need
-to be rebuilt. Successful compilation and offline tests on Windows/Linux do not constitute
-physical audio validation; keep that distinction explicit in release notes.
+If the tag has no GitHub release yet, the workflow creates a draft release before attaching
+the assets. Review and publish that draft after the build succeeds. An existing release is
+reused, and the workflow can also be dispatched manually with an existing tag if release
+assets need to be rebuilt. Successful compilation and offline tests on Windows/Linux do not
+constitute physical audio validation; keep that distinction explicit in release notes.
 
 ## Version honesty
 
