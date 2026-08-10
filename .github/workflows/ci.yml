@@ -10,6 +10,26 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  installers:
+    name: installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh tests/installers.sh
+      - name: Installer behavior tests
+        if: runner.os != 'Windows'
+        run: tests/installers.sh
+      - name: PowerShell installer behavior tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/installers.ps1
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -29,5 +49,5 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets
-      - run: cargo test --workspace
+      - run: cargo clippy --locked --workspace --all-targets
+      - run: cargo test --locked --workspace
