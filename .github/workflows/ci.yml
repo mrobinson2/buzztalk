@@ -43,6 +43,11 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # rust-cache can restore sherpa-onnx-sys build metadata without the
+      # crate's custom target/sherpa-onnx-prebuilt directory. Force its build
+      # script to rerun so the native libraries and link path stay in sync.
+      - name: Refresh sherpa-onnx native link cache
+        run: cargo clean -p sherpa-onnx-sys
       # cpal needs ALSA headers on Linux. There is no audio device in CI —
       # every test that needs real hardware is #[ignore]d.
       - name: Install Linux audio dev packages
