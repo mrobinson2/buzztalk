@@ -6,7 +6,7 @@
 
 ## Goal
 
-Make the standalone BuzzTalk audio gateway usable without a Buzz Desktop button. After one guided setup, a person can start, stop, toggle, inspect, or follow the gateway with one short command.
+Make the standalone BuzzTalk audio gateway routine to operate from a terminal. After one guided setup, a person can start, stop, toggle, inspect, or follow the gateway with one short command.
 
 macOS:
 
@@ -32,6 +32,14 @@ buzztalk-gateway.ps1 logs
 
 The helper manages the existing `buzztalkd` process. It does not embed BuzzTalk into Buzz Desktop, change Buzz identity behavior, or create a new relay protocol.
 
+## Relationship to the Desktop Audio Bridge
+
+This launcher and the [Buzz Desktop Audio Bridge](../plans/2026-08-10-buzz-desktop-buzztalk-audio-bridge.md) are complementary and independent. The launcher manages the standalone `buzztalkd` process for CLI/operator use. The Desktop Audio Bridge embeds only `buzztalk-audio` VoiceProcessingIO inside Buzz Desktop and must never launch `buzztalkd` or create a second identity or relay path.
+
+Neither capability is a stepping-stone, fallback product, or temporary substitute for the other. The launcher never starts or stops Buzz Desktop. Its contract ends at the installed `buzztalkd` binary, so it is independent of the bridge's unresolved Rust dependency-ownership decision. The shared boundary decision is recorded in [Launcher and Desktop Bridge Boundaries](../decisions/2026-08-10-launcher-bridge-boundaries.md).
+
+The companion bridge is supported only on Apple Silicon macOS: Intel macOS, Windows, and Linux show no disabled control and reserve no empty layout slot, and no future native bridge support is promised. That UI posture is independent of this launcher's Windows process-management support.
+
 ## Chosen Approach
 
 Ship two thin, platform-native launchers with the existing installers and release archives:
@@ -56,9 +64,9 @@ Both launchers implement the same command names, configuration schema, lifecycle
 5. Headphone routing preference.
 6. Endpoint-silence duration, defaulting to 700 ms.
 
-On macOS, VoiceProcessingIO is enabled by default. On Windows, it is disabled because `--vpio` is macOS-only. Configuration ends by printing the config path and the exact `on` command.
+On macOS, VoiceProcessingIO is enabled by default. On Windows, it is disabled because `--vpio` is macOS-only. Windows support in this design is process-management support; it does not assert equivalent native audio quality or hardware validation. Configuration ends by printing the config path and the exact `on` command.
 
-Before writing the configuration, `configure` verifies that the provided signing-key path exists, refers to a regular file, and can be opened for reading by the current user. The check opens and immediately closes the file without reading, parsing, or displaying any bytes. A missing, non-file, or inaccessible path stops configuration with `Signing key file is missing or unreadable: <path>` and leaves any existing configuration unchanged.
+Before writing the configuration, `configure` verifies that the provided signing-key path exists, refers to a regular file, and can be opened for reading by the current user. The check opens and immediately closes the file without reading, parsing, or displaying any bytes. A missing, non-file, or inaccessible path stops configuration with `Signing key file is missing or unreadable. Check KEY_FILE and run configure again.` and leaves any existing configuration unchanged. The error does not repeat the path.
 
 The command refuses to overwrite an existing configuration until the user confirms. A non-interactive invocation never prompts unexpectedly; if stdin is not interactive and configuration is missing, the helper exits with the configuration error code and prints the required `configure` command.
 
@@ -67,7 +75,7 @@ The command refuses to overwrite an existing configuration until the user confir
 - `on` starts `buzztalkd` in the background and returns to the terminal.
 - `off` stops only the process previously started by this helper.
 - `toggle` stops a running gateway or starts a stopped gateway.
-- `status` reports `running`, `stopped`, `stale state`, or `startup failed` with the PID and log path when relevant.
+- `status` reports `running`, `stopped`, `stale state`, or `startup failed` with the PID and explicit `logs` command when relevant; it does not print the resolved log path.
 - `logs` displays the last 50 lines and follows new output until interrupted.
 
 `on` and `off` are idempotent. Calling `on` while the owned gateway is running or `off` while it is stopped succeeds and explains that no state change was necessary.
@@ -120,7 +128,7 @@ The binary is resolved in this order:
 2. A `buzztalkd` or `buzztalkd.exe` sibling beside the installed launcher.
 3. `buzztalkd` or `buzztalkd.exe` on `PATH`.
 
-Failure to find an executable prints the expected installer location and exits without creating process state.
+Failure to find an executable exits without creating process state and directs the operator to reinstall BuzzTalk or set `BUZZTALKD_BIN`; it does not print a resolved internal executable path.
 
 ## Process and State Management
 
@@ -129,7 +137,11 @@ Default runtime paths:
 - macOS state: `~/.local/state/buzztalk/`
 - Windows state: `%LOCALAPPDATA%\BuzzTalk\state\`
 
-The directory holds the PID record and protected gateway logs. The launchers append to these logs and never rotate or truncate them automatically. Logs are therefore unbounded and may contain transcripts; operators are responsible for rotation or cleanup. Tests may override config, state, binary, and startup timing through documented `BUZZTALK_GATEWAY_*` environment variables:
+The directory holds the PID record and protected gateway logs. The launchers append to these logs and never rotate or truncate them automatically. Logs are therefore unbounded and may contain transcripts; operators are responsible for rotation or cleanup.
+
+Launcher-generated status, telemetry, and error messages never include keys, key contents, transcripts, channel identifiers, relay URLs, or resolved executable paths. Raw `buzztalkd` logs may contain transcripts and other operational context, so the launcher never echoes a log tail automatically from `on`, `off`, `toggle`, or `status`; it directs the operator to the explicit `logs` command instead.
+
+Tests may override config, state, binary, and startup timing through documented `BUZZTALK_GATEWAY_*` environment variables:
 
 - `BUZZTALK_GATEWAY_CONFIG_DIR`
 - `BUZZTALK_GATEWAY_STATE_DIR`
@@ -149,7 +161,7 @@ The directory holds the PID record and protected gateway logs. The launchers app
 6. Wait for `BUZZTALK_GATEWAY_STARTUP_WAIT_MS` milliseconds (1000 by default) and verify that the same process is still alive.
 7. Report `running` with the PID and log command.
 
-There is no gateway health endpoint, so readiness means the launched process survived the startup window. If it exits during that window, the helper removes its PID record, reports `startup failed`, and prints the last relevant log lines.
+There is no gateway health endpoint, so readiness means the launched process survived the startup window. If it exits during that window, the helper removes its PID record, reports `startup failed`, and directs the operator to `buzztalk-gateway logs` or `buzztalk-gateway.ps1 logs`. It does not echo potentially sensitive log lines into the failure message.
 
 ### Ownership check
 
@@ -158,7 +170,7 @@ Before reporting a gateway as running or stopping it, the helper verifies both:
 - The recorded PID exists.
 - The process identity matches the executable identity stored at launch.
 
-A missing process is stale state and the record is removed. A live PID belonging to another process is never signaled; the helper reports an ownership error and preserves enough state for manual diagnosis.
+A missing process is stale state and the record is removed. A live PID belonging to another process is never signaled; the helper reports an ownership error, directs the operator to `status` and the documented state-recovery procedure, and preserves enough state for manual diagnosis without printing observed executable paths.
 
 On Windows, process name alone is never sufficient. The launcher resolves the selected `buzztalkd.exe` to an absolute path before launch and records that path plus the process start time returned for the new process. For every later ownership check it obtains `ExecutablePath` and `CreationDate` for the PID through `Win32_Process`. The PID is owned only when:
 
@@ -201,7 +213,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\BuzzT
 
 The operator substitutes the desired launcher command for `status`. This bypass applies only to that PowerShell process; the installer does not change machine-wide or current-user execution policy. No `.cmd` companion is added in this change.
 
-Linux is not part of this change. The POSIX implementation should avoid gratuitous macOS-only syntax, but no Linux packaging or support claim is added until its live audio path is validated.
+Linux is not part of this change. The POSIX implementation should avoid gratuitous macOS-only syntax, but this design makes no Linux packaging or future-support claim.
 
 ## README Design
 
@@ -211,7 +223,7 @@ Add a prominent `Turn the audio gateway on or off` section near the beginning of
 2. The three daily commands: `on`, `off`, and `status`.
 3. `toggle` and `logs` as optional conveniences.
 4. The two default config locations.
-5. A short explanation that this runs standalone beside Buzz until a Buzz UI control exists.
+5. A short explanation that the launcher is the standalone CLI/operator control while the Desktop Audio Bridge is a separate in-process Buzz capability; neither replaces the other.
 6. Recovery guidance for startup failure, stale state, and viewing logs.
 7. A privacy and maintenance note that logs are unbounded, can contain transcripts, and must be rotated or removed by the operator when appropriate. Automatic rotation is not part of this change.
 8. The invocation-scoped PowerShell execution-policy fallback, explicitly stating that it does not modify persistent policy.
@@ -226,11 +238,11 @@ Messages lead with the outcome and end with the next action. Required cases incl
 - `BuzzTalk gateway is already running (PID N).`
 - `BuzzTalk gateway is stopped.`
 - `Configuration not found. Run: buzztalk-gateway configure`
-- `BuzzTalk failed during startup. Review: <log path>` followed by recent lines.
-- `Refusing to stop PID N because it is not the BuzzTalk gateway started by this helper.`
+- `BuzzTalk failed during startup. Run: buzztalk-gateway logs`
+- `Refusing to stop PID N because ownership could not be verified. Run: buzztalk-gateway status`
 - `VPIO=true is only supported on macOS; set VPIO=false on Windows.`
 
-The scripts never echo configuration values containing a secret and never print key-file contents.
+The scripts never echo configuration values containing a secret and never print key-file contents, transcripts, channel identifiers, relay URLs, or resolved executable paths in generated status or error messages.
 
 ## Testing Strategy
 
@@ -251,14 +263,16 @@ Shared behavioral cases for shell and PowerShell are:
 11. Windows rejects a process with the same PID/path but a different recorded creation time.
 12. A reused PID or wrong process identity is never terminated.
 13. A stale PID record is cleaned safely.
-14. Immediate child failure removes state, returns 1, and prints recent logs.
+14. Immediate child failure removes state, returns 1, and points to the explicit `logs` command without echoing recent logs.
 15. The default startup wait is 1000 ms, while `BUZZTALK_GATEWAY_STARTUP_WAIT_MS` shortens it in isolated tests.
 16. Invalid startup-wait overrides are rejected as configuration errors.
 17. macOS includes `--vpio` when enabled; Windows rejects it.
 18. Key-file contents never appear in stdout, stderr, state, or logs created by the helper.
 19. Paths and logs are created in overrideable temporary directories during tests.
+20. Generated status and error output contains a stable next action but no key material, transcript, channel identifier, relay URL, or resolved executable path.
+21. Key-file validation failures do not echo the configured key path.
 
-Release-workflow and installer tests assert that the correct helper is packaged, staged, installed, and rolled back with its matching binaries. README command examples are smoke-tested against the launchers' help output where practical.
+These lifecycle and Windows full-path-plus-creation-time ownership tests use fake processes and remain independent of audio devices, relay access, and Desktop Audio Bridge hardware validation. Release-workflow and installer tests assert that the correct helper is packaged, staged, installed, and rolled back with its matching binaries. README command examples are smoke-tested against the launchers' help output where practical.
 
 ## Acceptance Criteria
 
@@ -276,6 +290,9 @@ Release-workflow and installer tests assert that the correct helper is packaged,
 - README and installer notes provide a per-invocation PowerShell execution-policy fallback without changing persistent policy.
 - README states that transcript-bearing gateway logs grow without bound and require operator-managed cleanup or rotation.
 - The README distinguishes launcher support from the current live-audio validation status of each platform.
+- The launcher remains independent of the Desktop Audio Bridge and its crate-ownership decision; it controls only the installed `buzztalkd` process.
+- Windows launcher support is process-management support and creates no Windows Desktop Audio Bridge or native-audio support claim.
+- Launcher process-ownership tests pass without audio hardware, a relay, or a Buzz Desktop runtime.
 
 ## Non-Goals
 

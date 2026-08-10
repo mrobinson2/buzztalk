@@ -8,11 +8,17 @@
 
 **Tech Stack:** Rust, Tauri 2, React 19, TypeScript, Tailwind CSS, `buzztalk-audio`, CoreAudio VoiceProcessingIO, existing Buzz Huddle STT/TTS and test infrastructure.
 
+## Relationship to the Gateway Launcher
+
+This bridge and the [BuzzTalk Gateway Launcher](../specs/2026-08-10-buzztalk-gateway-launcher-design.md) are complementary and independent. The launcher manages the standalone `buzztalkd` process for CLI/operator use. This bridge embeds only the `buzztalk-audio` VoiceProcessingIO engine in Buzz Desktop; it never launches `buzztalkd`, a sidecar, or a second relay or identity path.
+
+Neither capability is a stepping-stone, fallback product, or temporary substitute for the other. The launcher's macOS/Windows process-management support does not imply a Windows Desktop Audio Bridge. The shared boundary and dependency decision is recorded in [Launcher and Desktop Bridge Boundaries](../decisions/2026-08-10-launcher-bridge-boundaries.md).
+
 ## Global Constraints
 
 - Target upstream repository: `block/buzz`, baseline `main` commit `07a3c768d619db31fee3f0590f9433cdd1213e8f` (2026-08-10). Rebase and remap paths if upstream moves; preserve the interfaces and acceptance criteria in this plan.
-- Target BuzzTalk revision: `9fbbfc61260bb63c714a5c3694ec92cc8a602406` until `buzztalk-audio` has an accepted crates.io or vendored home.
-- V1 is macOS-only and hidden behind runtime capability. Windows and Linux continue using the current Huddle path without a disabled control or empty layout slot.
+- Draft experiment revision: `9fbbfc61260bb63c714a5c3694ec92cc8a602406`. A personal Git dependency is permitted only while the upstream PR remains draft. Task 0 must recommend a maintained dependency home before implementation; the PR must not merge until Buzz maintainers accept the owner and the manifest uses that maintained source.
+- This bridge is supported only on Apple Silicon macOS and hidden behind runtime capability. Intel macOS, Windows, and Linux continue using the current Huddle path without a disabled control or empty layout slot. No future native bridge support is claimed.
 - The user-facing name is **Conversation mode**. `BuzzTalk` is an implementation attribution in help text and developer documentation, not the primary control label.
 - Buzz retains its existing identity and signing path. No nsec, key file, or signing secret crosses the frontend boundary or enters BuzzTalk code.
 - Buzz retains its existing Huddle relay connection, STT/TTS implementations, model manager, voice selection, agent list, and message publication path. Do not launch `buzztalkd` and do not create a second relay session.
@@ -20,6 +26,7 @@
 - At most one playback owner is authoritative. Agent PCM must pass through VoiceProcessingIO while Conversation mode is active so playback and its render reference are identical.
 - Failed bridge start restores the prior WebView audio path automatically. Failed bridge stop must leave the Huddle muted rather than accidentally transmitting.
 - Leaving a Huddle, signing out, app shutdown, or identity recovery stops and joins every bridge worker.
+- Bridge telemetry contains stable phases, durations, and error codes only. User-visible errors add fixed safe recovery copy. Neither contains audio, keys, transcripts, channel identifiers, relay URLs, pubkeys, device paths, or raw OS/dependency errors.
 - No `unsafe` code in Buzz. No new production `unwrap()` or `expect()`. Every new public API has a doc comment.
 - Activate Hermit before Buzz commands: `. ./bin/activate-hermit`.
 - Commit each task independently with DCO sign-off: `git commit -s`.
@@ -132,7 +139,8 @@ Use a visually hidden `aria-live="polite"` span for transition announcements. Do
 - Unsupported platforms omit the button entirely.
 - Microphone permission denial retains Buzz's existing permission recovery UI.
 - Native engine failure emits a stable error code for tests and a safe human-readable message for UI.
-- Bridge telemetry contains phases, durations, and error codes only—never audio, transcripts, keys, channel names, or pubkeys.
+- Native-start failure says standard Huddle audio was restored and offers Retry; it does not expose internal paths, raw dependency errors, keys, transcripts, or channel identifiers.
+- Bridge telemetry contains phases, durations, and error codes only—never audio, transcripts, keys, channel names or identifiers, relay URLs, device paths, or pubkeys.
 
 ### Product acceptance criteria
 
@@ -146,6 +154,7 @@ Use a visually hidden `aria-live="polite"` span for transition announcements. Do
 8. Huddle leave and app shutdown stop the audio unit and worker threads.
 9. The feature is absent on unsupported platforms, not merely disabled.
 10. All unit, Desktop, Tauri, and full `just ci` gates pass.
+11. The upstream PR remains draft and unmergeable until Buzz maintainers accept a maintained home for `buzztalk-audio` and the dependency manifest conforms to that decision.
 
 ---
 
@@ -170,11 +179,12 @@ Use a visually hidden `aria-live="polite"` span for transition announcements. Do
 - `desktop/src/features/huddle/lib/audioBridgeButtonState.test.mjs` — state/copy/accessibility tests.
 - `desktop/src/features/huddle/lib/audioBridgeTransition.ts` — frontend transactional cutover state machine.
 - `desktop/src/features/huddle/lib/audioBridgeTransition.test.mjs` — start, stop, rollback, and stale-generation tests.
+- `desktop/docs/buzztalk-audio-dependency-decision.md` — Task 0 recommendation, ownership requirements, and maintainer disposition.
 - `desktop/docs/buzztalk-audio-bridge.md` — operator behavior, feature gate, fallback, and hardware validation record.
 
 ### Files modified in `block/buzz`
 
-- `desktop/src-tauri/Cargo.toml` and `Cargo.lock` — pinned macOS-only `buzztalk-audio` dependency.
+- `desktop/src-tauri/Cargo.toml` and `Cargo.lock` — Apple Silicon macOS-only `buzztalk-audio` dependency from the Task 0 maintained source; a personal Git revision is draft-only.
 - `desktop/src-tauri/src/huddle/mod.rs` — module registration, Tauri commands, teardown, and raw WebView ingress delegation.
 - `desktop/src-tauri/src/huddle/state.rs` — serialized bridge snapshot plus non-serialized runtime handle.
 - `desktop/src-tauri/src/huddle/audio_output.rs` — playback target abstraction.
@@ -196,12 +206,44 @@ Use a visually hidden `aria-live="polite"` span for transition announcements. Do
 
 Each task is one review boundary. A Claude Sonnet or Codex Luna worker receives:
 
-1. This document's header, Global Constraints, and the single assigned task.
-2. The latest branch SHA and prior task's produced interface block.
+1. This document's header, Relationship to the Gateway Launcher, Global Constraints, and the single assigned task.
+2. The latest branch SHA, Task 0 dependency disposition, and prior task's produced interface block.
 3. Permission to edit only the task's listed files unless a compile error proves one adjacent registration file is required.
 4. A requirement to leave a signed commit and a short evidence note containing commands and exit codes.
 
-The coordinating agent reviews the diff and reruns the task's named gate before dispatching the next task. Execute Tasks 1–9 in order because each task consumes an interface or committed behavior from the preceding task. Physical hardware validation is never delegated to an agent without access to the actual Mac audio devices.
+The coordinating agent reviews the diff and reruns the task's named gate before dispatching the next task. Execute Tasks 0–9 in order because each task consumes a decision, interface, or committed behavior from the preceding task. Physical hardware validation is never delegated and is limited to the Apple Silicon routes listed in Task 8; fake-driven CI does not replace it.
+
+---
+
+### Task 0: Record the dependency ownership recommendation
+
+**Files:**
+- Create: `desktop/docs/buzztalk-audio-dependency-decision.md`
+
+**Decision gate:**
+- Consumes: Buzz's dependency-ownership expectations, the minimal public surface required from `buzztalk-audio`, and the draft revision recorded above.
+- Produces: one explicit recommendation among crates.io publication, vendoring into the Buzz monorepo, or another maintainer-approved home.
+- The recommendation names the long-term owner and records versioning, update, security-response, license-provenance, and source-review expectations.
+- A personal Git pin may be recorded only as a draft experiment mechanism, never as the merge recommendation.
+
+- [ ] **Step 1: Compare the three ownership options**
+
+Document operational ownership, release/update mechanics, security response, license provenance, and impact on Buzz's supply-chain review for each option. Do not choose based only on implementation speed.
+
+- [ ] **Step 2: Write the recommendation and required next action**
+
+Name one recommended option and the maintainer action needed to accept or reject it. If maintainers have not decided, mark the disposition `Open`, keep the PR draft, and allow Task 1 to use the pinned revision only for draft experimentation.
+
+- [ ] **Step 3: Review the gate before source edits**
+
+The coordinating agent confirms the document contains all required ownership fields and an explicit `Merge allowed: no` while disposition is open. No production source or Cargo manifest changes begin before this review.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add desktop/docs/buzztalk-audio-dependency-decision.md
+git commit -s -m "docs(desktop): recommend ownership for native audio dependency"
+```
 
 ---
 
@@ -254,7 +296,7 @@ pub(crate) trait NativeDuplexDriver: Send + 'static {
 
 - `AudioBridgeSnapshot::unsupported()` returns `supported=false`, `enabled=false`, `phase=Off`, and no error.
 - `AudioBridgeSnapshot::off_supported()` returns the same except `supported=true`.
-- The production driver exists only under `cfg(target_os = "macos")`; fake drivers compile on every CI platform.
+- The production driver exists only under `cfg(all(target_os = "macos", target_arch = "aarch64"))`; fake drivers compile on every CI platform and unsupported targets return `AudioBridgeSnapshot::unsupported()`.
 
 - [ ] **Step 1: Add the failing state-contract tests**
 
@@ -283,9 +325,9 @@ cargo test --manifest-path desktop/src-tauri/Cargo.toml huddle::buzztalk_bridge_
 
 Expected: compile failure because the module and types do not exist.
 
-- [ ] **Step 3: Add the pinned macOS-only dependency**
+- [ ] **Step 3: Add the Apple Silicon macOS-only dependency selected by Task 0**
 
-Add under the existing macOS target dependencies:
+Use the maintained source accepted in Task 0. If its disposition is still open, the following personal Git pin is allowed only on the draft experiment branch:
 
 ```toml
 buzztalk-audio = { git = "https://github.com/mrobinson2/buzztalk", rev = "9fbbfc61260bb63c714a5c3694ec92cc8a602406" }
@@ -304,7 +346,7 @@ cargo test --manifest-path desktop/src-tauri/Cargo.toml huddle::buzztalk_bridge_
 cargo check --manifest-path desktop/src-tauri/Cargo.toml
 ```
 
-Expected: PASS on the current platform; non-macOS builds never resolve macOS-only symbols.
+Expected: PASS on the current platform; unsupported targets never resolve Apple Silicon macOS-only symbols.
 
 - [ ] **Step 6: Commit**
 
@@ -545,14 +587,14 @@ pub fn get_buzztalk_audio_bridge_status(
 ) -> Result<AudioBridgeSnapshot, String>;
 ```
 
-- Start preconditions: macOS support, active Huddle phase, no existing runtime, current generation captured.
+- Start preconditions: Apple Silicon macOS runtime capability, active Huddle phase, no existing runtime, current generation captured.
 - Start commit order: snapshot `Starting` → construct runtime → set active producer NativeBridge → set playback target bridge → install runtime → snapshot `Listening` → emit state.
-- Any failure before commit: stop partial runtime, restore WebView producer and rodio target, snapshot `Error`, emit state, return the snapshot through the command error message/code contract.
+- Any failure before commit: stop partial runtime, restore WebView producer and rodio target, snapshot `Error`, emit state, and return a stable error code plus fixed recovery copy through the command contract. Raw CoreAudio, OS, device, dependency, and path details may be used transiently to select the code, but new bridge code neither logs nor serializes them.
 - Stop order: snapshot `Stopping` → mute → cancel TTS → stop runtime → restore rodio target → restore WebView producer → snapshot `Off` → emit state.
 
 - [ ] **Step 1: Write RED transaction tests**
 
-Cover successful start/stop, repeated start/stop, start outside a Huddle, native constructor failure rollback, stale generation, leave-during-start, and shutdown teardown.
+Cover successful start/stop, repeated start/stop, start outside a Huddle, native constructor failure rollback, stale generation, leave-during-start, and shutdown teardown. Assert that constructor errors containing a fake device path, channel identifier, transcript fragment, or dependency URL are reduced to the stable code and safe recovery copy before serialization.
 
 - [ ] **Step 2: Run focused tests and observe RED**
 
@@ -784,7 +826,7 @@ Expected: every command exits 0. Record exact failing commands and fixes in the 
 
 - [ ] **Step 4: Perform macOS hardware validation**
 
-On the validated Apple Silicon Mac, test:
+This step is required and non-delegated. Perform it only on the validated Apple Silicon Mac and only on these routes:
 
 1. Built-in microphone + headphones.
 2. One Bluetooth headset used for both input and output.
@@ -795,11 +837,11 @@ On the validated Apple Silicon Mac, test:
 
 For each route, record: native start result, transcription correctness, audible TTS, self-interruption count, three intentional barge-in latencies, and whether teardown releases the device.
 
-Pass criteria: zero false self-interruptions in the short validation script; each deliberate interruption silences TTS within 50 ms; route reconnect recovers or degrades to standard Huddle audio with an explicit message.
+Pass criteria: zero false self-interruptions in the short validation script; each deliberate interruption silences TTS within 50 ms; route reconnect recovers or degrades to standard Huddle audio with an explicit message. Do not extrapolate these observations to Windows, Linux, Intel macOS, iOS, or any unlisted route.
 
 - [ ] **Step 5: Write operator documentation**
 
-Document the macOS-only scope, user-visible states, fallback behavior, telemetry boundaries, feature gate, known limitations, dependency revision, and hardware results. Explicitly state that Conversation mode does not change keys, messages, models, or relay topology.
+Document the Apple Silicon macOS-only scope, user-visible states, fallback behavior, telemetry boundaries, feature gate, known limitations, dependency decision and revision, and hardware results. Explicitly state that Conversation mode does not change keys, messages, models, or relay topology. The bridge creates no separate log file or rotation mechanism; bridge diagnostics added to existing Buzz logging contain stable phase/error metadata only, while Buzz's existing retention policy remains authoritative.
 
 - [ ] **Step 6: Commit**
 
@@ -844,25 +886,25 @@ Pass criteria: `just ci` and diff check exit 0; every commit contains `Signed-of
 
 - [ ] **Step 3: Self-review against the acceptance criteria**
 
-For each of the ten product acceptance criteria, cite one automated test, hardware observation, or explicit unsupported-platform branch. Fix any criterion without evidence before opening the PR.
+For each of the eleven product acceptance criteria, cite one automated test, hardware observation, explicit unsupported-platform branch, or accepted ownership record. Fix any criterion without evidence before opening the PR.
 
 - [ ] **Step 4: Open a draft PR**
 
 The PR body must contain:
 
 - Problem: split WebView capture and Rust playback prevent a shared render reference.
-- Scope: macOS Huddle audio ownership only; no identity, relay, STT/TTS, model, or message changes.
+- Scope: Apple Silicon macOS Huddle audio ownership only; no identity, relay, STT/TTS, model, or message changes.
 - UX: Conversation button states and fallback.
 - Safety: producer exclusivity, transactional rollback, feature/capability gate.
 - Evidence: automated commands, screenshots, and physical-route table.
-- Dependency: exact BuzzTalk revision and follow-up path to crates.io/vendor ownership.
+- Dependency: link the Task 0 decision, identify the accepted maintainer and source, and show that the manifest conforms. If disposition remains open, identify the exact draft-only BuzzTalk revision and state `Merge allowed: no`.
 - Explicit non-goals: iOS, Android, Windows/Linux native bridge, speech-stack deduplication.
 
-Use a draft because the pinned external dependency requires maintainer agreement before final merge.
+The PR remains draft while dependency ownership is open. A personal Git revision is sufficient only for draft experimentation and is never merge-ready.
 
 - [ ] **Step 5: Stop at the review boundary**
 
-Do not merge, publish, or alter upstream release configuration without explicit repository-owner authorization.
+Do not merge, publish, or alter upstream release configuration without explicit repository-owner authorization. Do not mark the PR ready for review or request merge while Task 0 says `Merge allowed: no`, while ownership is unnamed, or while the manifest still points to an unaccepted personal Git home.
 
 ---
 
@@ -877,10 +919,12 @@ This plan is complete only when:
 - Existing Buzz identity, relay, messages, models, agent routing, STT, TTS, and cancellation remain the sources of truth.
 - All commits carry DCO sign-off and `just ci` passes after the final rebase.
 - The draft upstream PR includes evidence and declares the external dependency decision openly.
+- Buzz maintainers have accepted a maintained home and named owner for `buzztalk-audio`; the manifest conforms to that decision. Until then, the PR remains draft and this plan is not merge-complete.
 
 ## Skeptical Review Notes
 
-- **Weakness:** the plan pins `buzztalk-audio` from a personal Git repository. That is acceptable for a working experimental PR but may be rejected for long-term upstream ownership. The PR must remain draft until maintainers choose crates.io publication, vendoring into `buzz-voice`, or another ownership model.
+- **Dependency gate:** the personal Git pin is permitted only for a working draft experiment and is not an acceptable merge state. Task 0 requires a recommendation among crates.io publication, vendoring into the Buzz monorepo, or another maintainer-approved home; the PR remains draft until maintainers accept the owner and source.
 - **Largest technical risk:** current TTS playback code may couple synthesis and rodio more tightly than the indexed boundary suggests. Task 4 protects the rest of the plan by extracting one small playback trait and proving current rodio behavior before adding the native target.
 - **Largest product risk:** two audio owners during transition. Tasks 2, 5, and 6 make producer selection and rollback explicit and independently tested.
+- **Largest disclosure risk:** raw native errors can contain device or dependency details. Task 5 requires fixed recovery copy and tests that raw paths, identifiers, transcript fragments, and URLs do not cross the Tauri boundary.
 - **What this plan intentionally avoids:** embedding the full BuzzTalk conversation pipeline, handling keys outside Buzz, launching a sidecar daemon, replacing Buzz's mature Huddle speech stack, or pretending unvalidated platforms are supported.
