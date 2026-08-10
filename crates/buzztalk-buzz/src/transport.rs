@@ -213,7 +213,9 @@ fn serve(
                 if let Some(confirmed) = handle_relay_text(&text, config, &own_pubkey, reply_tx) {
                     // The relay committed a message we published; send its
                     // held 👀 reaction now that the target exists.
-                    if let Some(pos) = pending_reactions.iter().position(|(id, _)| *id == confirmed)
+                    if let Some(pos) = pending_reactions
+                        .iter()
+                        .position(|(id, _)| *id == confirmed)
                     {
                         let (_, reaction) = pending_reactions.remove(pos);
                         if let Err(e) = send(socket, ClientMessage::event(reaction)) {
@@ -327,11 +329,16 @@ fn publish(
 
     // Build+sign the 👀 reaction now, but hand it back for the loop to send
     // once the relay confirms the message exists.
-    events::build_reaction(config.channel_id, &message_id, &author, events::LISTENING_REACTION)
-        .and_then(|b| sign(b, keys).map_err(|e| crate::error::BuzzError::EventBuild(e.to_string())))
-        .map(|reaction| (message_id, reaction))
-        .map_err(|e| eprintln!("buzztalk-buzz: could not build listening reaction: {e}"))
-        .ok()
+    events::build_reaction(
+        config.channel_id,
+        &message_id,
+        &author,
+        events::LISTENING_REACTION,
+    )
+    .and_then(|b| sign(b, keys).map_err(|e| crate::error::BuzzError::EventBuild(e.to_string())))
+    .map(|reaction| (message_id, reaction))
+    .map_err(|e| eprintln!("buzztalk-buzz: could not build listening reaction: {e}"))
+    .ok()
 }
 
 fn sign_auth_event(

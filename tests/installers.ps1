@@ -151,6 +151,7 @@ try {
 
     Write-Host "$passed passed; $failed failed"
     if ($failed -ne 0) { exit 1 }
+    exit 0
 } finally {
     if ($null -ne $server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     if (Test-Path $tempRoot) { Remove-Item -Recurse -Force $tempRoot }

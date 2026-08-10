@@ -128,8 +128,9 @@ exec "$BUZZTALK_REAL_MV" "$@"
 EOF
     chmod +x "$fake_bin/mv"
 
+    real_mv=$(command -v mv)
     if PATH="$fake_bin:$PATH" \
-        BUZZTALK_REAL_MV="$(command -v mv)" \
+        BUZZTALK_REAL_MV="$real_mv" \
         BUZZTALK_MV_COUNT_FILE="$TMP_ROOT/mv-count" \
         BUZZTALK_VERSION=v9.8.10 \
         BUZZTALK_INSTALL_DIR="$install_dir" \
