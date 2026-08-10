@@ -27,16 +27,30 @@ Verified ready: every internal dependency carries an explicit `version` alongsid
 
 ## GitHub release
 
-```
-cargo build --release -p buzztalk-pipeline -p buzztalk-buzz
-tar czf buzztalk-<version>-macos-arm64.tar.gz -C target/release buzztalk-demo buzztalkd
-shasum -a 256 buzztalk-<version>-macos-arm64.tar.gz > SHA256SUMS.txt
-git tag -a <version> -m "..." && git push origin <version>
-gh release create <version> --notes-file NOTES.md --prerelease *.tar.gz SHA256SUMS.txt
+The `Release` workflow builds native archives on each supported installer target:
+
+| Runner | Release asset |
+|---|---|
+| Apple Silicon macOS | `buzztalk-macos-arm64.tar.gz` |
+| Linux x86_64 | `buzztalk-linux-x86_64.tar.gz` |
+| Windows x86_64 | `buzztalk-windows-x86_64.zip` |
+
+Each archive contains `buzztalkd` and `buzztalk-demo` (with `.exe` suffixes on
+Windows). The workflow uploads a checksum beside every archive and assembles all three
+entries into `SHA256SUMS`, which is what the installers verify.
+
+Create and push the tag to start the native build:
+
+```bash
+git tag -a <version> -m "..."
+git push origin <version>
 ```
 
-Binaries are macOS arm64 only. Cross-compiled artifacts are not published because no
-Windows or Linux machine has run the audio path — CI proves compilation, not audio.
+If the tag has no GitHub release yet, the workflow creates a draft release before attaching
+the assets. Review and publish that draft after the build succeeds. An existing release is
+reused, and the workflow can also be dispatched manually with an existing tag if release
+assets need to be rebuilt. Successful compilation and offline tests on Windows/Linux do not
+constitute physical audio validation; keep that distinction explicit in release notes.
 
 ## Version honesty
 
