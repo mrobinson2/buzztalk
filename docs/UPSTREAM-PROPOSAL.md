@@ -23,11 +23,11 @@ one clock, so the exact samples sent to the speaker exist as an
 echo-cancellation reference. That single change turns Buzz's existing
 speech engines into an interruptible conversation.
 
-## Evidence (all measured, logs in-repo)
+## Evidence (all measured, privacy-safe summary in-repo)
 
 Everything below was measured 2026-08-09 on real hardware against a real
-`buzz-relay` and a live agent (`buzz-acp` + `claude-agent-acp`); raw logs
-and the full session record are in
+`buzz-relay` and a live agent (`buzz-acp` + `claude-agent-acp`). Aggregate
+measurements, setup, and observed failures are in
 `docs/live-session-2026-08-09/SESSION-REPORT.md`.
 
 | Claim | Number |

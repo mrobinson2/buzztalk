@@ -34,23 +34,24 @@ one clock, which makes the exact output samples available as that reference.
 
 ## What actually exists and is measured
 
-10 Rust crates, 257 tests, Apache-2.0, shipping binaries for macOS/Linux/Windows.
+12 Rust crates, an automated cross-platform workspace suite, Apache-2.0, and release
+artifacts for macOS. Windows and Linux are CI build targets, not hardware-validated claims.
 
-- barge-in to silence: 7–15 ms
-- end of speech to final transcript: 72–203 ms
-- echo cancellation: 36.6 dB (synthetic)
+- barge-in to silence: 7.2–43.0 ms live across headset and loudspeaker paths
+- end of speech to final transcript: 37–235 ms typical live
+- echo cancellation: 36.6 dB synthetic ERLE; functional loudspeaker AEC/barge-in proven
 - speech synthesis: ~4x faster than real time
 - 481 µs of a 10 ms real-time budget per frame
-- proven end to end against a real Buzz relay: authenticated, published a signed
-  message, read it back with Buzz's own CLI
+- proven end to end against a real Buzz relay and live agent, including multi-turn voice,
+  spoken replies, and interruption
 
 ## What is NOT true yet, stated plainly
 
-- **No AI agent has ever replied to it.** It publishes speech and subscribes for
-  replies; nothing has answered. Turn attribution, "the agent finished speaking"
-  detection, and barge-in against real agent audio are all untested.
-- **Every echo-cancellation number is synthetic.** No microphone has heard a real
-  speaker. Barge-in over loudspeakers is unverified.
+- **The controlled acoustic ERLE number is still synthetic.** A real microphone has heard
+  a real loudspeaker and functional barge-in is proven, but the 36.6 dB figure has not been
+  replaced by a controlled hardware bench measurement.
+- **Windows and Linux audio are untested on physical hardware.** CI proves compilation and
+  the offline suite only; the validated product path is Apple Silicon macOS.
 - **There is no UI.** It's a terminal program. No mic button, no live transcript
   in the composer.
 - Agent replies arrive as complete messages rather than streaming, so "start

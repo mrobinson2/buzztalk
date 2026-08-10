@@ -14,13 +14,13 @@ the echo canceller a true reference — the thing Buzz's webview-capture
 architecture can't do, and the whole reason this exists.
 
 Repo: **https://github.com/mrobinson2/buzztalk** (owner `mrobinson2`).
-Local: `~/Code/buzztalk`. Use `~/.cargo/bin/cargo` (add `$HOME/.cargo/bin`
-to PATH — plain `cargo` is often not found in fresh shells).
+Run commands from the repository root. Ensure the Rust toolchain's binary
+directory is on PATH before invoking `cargo`.
 
 ## Where it stands (proven, this session)
 
-All measured on real hardware against the user's real hosted community
-(`wss://mrtek.communities.buzz.xyz`), not a mock:
+All measured on real hardware against a private hosted Buzz community,
+not a mock:
 
 - **Conversation loop closed** — live Claude agents reply to spoken input,
   spoken back. Dozens of turns.
@@ -40,25 +40,22 @@ All measured on real hardware against the user's real hosted community
 - **👀 "listening" reaction** on each spoken message (fires after the relay
   OKs the message — a race fix; see commit 4b66820).
 
-## The live setup right now (may be stale by next session)
+## The live setup used for validation (historical)
 
-- `buzztalkd` running on the Mac mini, signing as the user (Michael,
-  pubkey `770ad6635d0e99e77591f05d49db3cf006d6646a390471c81aebd6a6887cc49d`),
-  channel **The Bridge** `9ad66e65-68d8-4126-a41d-d8286e430363` on
-  `wss://mrtek.communities.buzz.xyz`, speaking Coordinator
-  `a8c959c4e9caf6f2cc4fdd1cb3a894a4893f211dea26c0d5e84517fb80a2809f`.
-  Log: `/private/tmp/buzztalk_bridge_eyes2.log`.
-- The user's signing key is at `~/michael.nsec` (they pasted it this
-  session — **advise them to rotate it** if this app ever points at a
-  relay beyond their own community; it's in this session's transcript).
+- `buzztalkd` ran on an Apple Silicon Mac, signing as the test user in a
+  private hosted channel and speaking replies from the Coordinator agent.
+  Exact relay, channel, identity, agent, and temporary-log identifiers are
+  intentionally omitted from this public handover.
+- The validation used a session-provided signing credential. Its former
+  location is intentionally omitted; rotate any credential ever exposed in
+  a terminal or session transcript before reusing that identity.
 - The three crew agents (Coordinator/Researcher/Scribe) are **app-run**
-  registered Buzz agents in the user's MRTek community, Opus-backed,
+  registered Buzz agents in the private hosted community, Opus-backed,
   `respond_to=owner-only`, `subscribe=Mentions`. They live on the hosted
-  relay, not localhost.
-- A local dev relay + `buzz-acp` harness crew exist under
-  `/private/tmp/buzz-architecture-udo7W6/buzz` (a Buzz clone) — **that
-  path is in /tmp and will vanish on reboot.** The `buzz` CLI binary there
-  (`target/debug/buzz`) is what queried the relay this session.
+  relay, not the local development relay.
+- A temporary Buzz clone supplied the local dev relay, `buzz-acp` harness,
+  and `buzz` CLI used to query the relay. That disposable checkout was not
+  a durable part of the repository and may no longer exist.
 
 ## Key running-it facts (learned the hard way)
 
@@ -105,8 +102,9 @@ All measured on real hardware against the user's real hosted community
    (C ABI) is scaffolded. Next: install Xcode, wire iOS onnxruntime, then
    the Flutter mic button.
 6. **Windows/Linux audio** — untested. `docs/WINDOWS-TEST.md` has a
-   ready-to-run guide for the user's Surface (built-in mic + cpal, no
-   `--vpio`). Waiting on the user to run it and report terminal output.
+   ready-to-run Windows guide for a built-in mic + cpal (`--vpio` is
+   macOS-only). A physical Windows run and captured terminal output are
+   still required.
 7. **Mic button in Buzz desktop** — real drop-in code +
    guide in `examples/buzz-desktop-integration/`. Landing it is a
    block/buzz PR (`docs/UPSTREAM-PROPOSAL.md` is the pitch).
@@ -129,15 +127,14 @@ via sherpa-onnx) · `buzztalk-tts` (Kyutai Pocket) · `buzztalk-session`
 (C ABI for mobile) · `buzztalk-labs` (measurement harnesses incl.
 `capture-dump`). Binary: `buzztalkd`.
 
-Tests: **265 workspace + 18 audio**, all green; clippy clean. Run
-`cargo test --workspace`.
+The live-session record reports **265 workspace + 18 audio** tests passing and a clean
+clippy run at that point in time. Re-run `cargo test --workspace` for current evidence.
 
-## Docs to read (all in `docs/`, mirrored to iCloud
-`03-Side-Ventures/BuzzTalk/`)
+## Docs to read (all in `docs/`)
 
 - `PHASE-0.md` — AEC bake-off + the closed-loop and live-session records.
-- `live-session-2026-08-09/SESSION-REPORT.md` — the full day, raw logs,
-  every number and bug.
+- `live-session-2026-08-09/SESSION-REPORT.md` — privacy-safe aggregate
+  measurements, validation setup, and observed bugs.
 - `VOICE-CREW-SETUP.md` — reproduce the multi-agent voice demo.
 - `IOS-VOICE-PORT.md` — the iPhone plan + what compiles.
 - `UPSTREAM-PROPOSAL.md` — pitch to make BuzzTalk Buzz's voice engine.
@@ -153,14 +150,13 @@ filter · `ec961fc` README quick-start + iOS plan · `fce7689` dead-capture
 self-heal + guards · `42d7c6a` VPIO engine · `0a0e645` live-session docs ·
 `2258e48` self-healing engine. All pushed to `origin/main`.
 
-Note: git commits use auto-derived identity
-`michaelrobinson@Michaels-PC.local` — if the user wants proper authorship
-before more public commits, set `git config --global user.email`.
+Before public commits, confirm that the repository's Git author name and
+email are intentional rather than host-derived defaults.
 
 ## First moves for the next session
 
 1. Read `SESSION-REPORT.md` and this file.
-2. Check what's still running: `pgrep -fl buzztalkd`, `docker ps | grep
-   buzz`, and whether `/private/tmp/buzz-architecture-udo7W6` survives.
+2. Check whether any local `buzztalkd`, Buzz relay, or harness processes
+   from prior testing are still running.
 3. Ask the user which backlog item — most likely the **TTS front-clip fix**
    (small, high-impact, user is hitting it) or the **launch video**.

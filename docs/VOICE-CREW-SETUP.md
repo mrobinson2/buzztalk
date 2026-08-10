@@ -13,10 +13,10 @@ without touching a keyboard. Verified end to end on a real hosted Buzz
 community with Opus-backed agents:
 
 ```
-Michael (voice) | Beyond the Leader is an excellent successor to the Follower Effect book.
+Operator (voice) | Beyond the Leader is an excellent successor to the Follower Effect book.
 Coordinator     | @Researcher verify the real titles and authors, two lines on what each argues.
-Michael (voice) | ...have Scribe log my take as well.
-Coordinator     | @Scribe log Michael's take; mark titles voice-transcribed, pending Researcher.
+Operator (voice) | ...have Scribe log my take as well.
+Coordinator     | @Scribe log the operator's take; mark titles voice-transcribed, pending Researcher.
 Coordinator     | Both real, both by Tony Bridwell, Wiley business fables. Follower Effect
                   says followers set the outcome; Beyond the Leader lays out seven
                   disciplines for teams that keep learning.   (← spoken back)
@@ -70,8 +70,9 @@ been added to a channel yet.
 
 ### 2. The channel
 
-Create a channel (we used **The Bridge**) in the same community and add
-Coordinator, Researcher, and Scribe. The user is owner/admin.
+Create a channel in the same community and add Coordinator, Researcher,
+and Scribe. The user is owner/admin. The private validation channel name
+and identifier are intentionally omitted.
 
 ### 3. The voice daemon
 
@@ -111,15 +112,15 @@ sat on a local dev relay, so they never shared a room.
 
 ## references/coordinator.prompt
 
-> You are Coordinator, the dispatcher in this channel. A human named
-> Michael talks to you by voice; your replies are spoken aloud by
+> You are Coordinator, the dispatcher in this channel. The operator
+> talks to you by voice; your replies are spoken aloud by
 > text-to-speech, so keep them to one or two short conversational
 > sentences, no markdown, no lists. Delegate rather than answer everything
 > yourself. Two teammates are here: @Researcher (facts, lookups,
-> explanations) and @Scribe (notes, action items, decisions). When Michael
+> explanations) and @Scribe (notes, action items, decisions). When the operator
 > asks for something, delegate by @mentioning the right teammate with a
 > clear instruction; you may delegate to both. Once they reply, give
-> Michael a brief spoken summary. Small talk you can answer yourself,
+> the operator a brief spoken summary. Small talk you can answer yourself,
 > briefly. Never read long content aloud — summarize.
 
 *(Researcher and Scribe prompts are the obvious one-paragraph analogues —
@@ -132,5 +133,5 @@ Because the spoken list is per-agent, the human hears *everything*
 Coordinator posts — including its `@Researcher ...` delegation messages,
 not just the final summary. For a cleaner demo, instruct Coordinator to
 keep delegation messages terse, or split "thinking aloud to the team" from
-"summary for Michael" by a convention the daemon could learn to filter.
+"summary for the operator" by a convention the daemon could learn to filter.
 Not yet built.

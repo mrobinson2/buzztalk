@@ -54,6 +54,7 @@ constitute physical audio validation; keep that distinction explicit in release 
 
 ## Version honesty
 
-Keep the `-alpha` suffix until the acoustic path is validated on physical hardware.
-Every echo-cancellation number in this repository is synthetic, and a bare `v0.1.0`
-would imply a completeness that does not exist.
+Keep the `-alpha` suffix while platform coverage and packaging remain narrow. Functional
+loudspeaker barge-in with live AEC is validated on Apple Silicon macOS, but the controlled
+hardware ERLE number is still pending and Windows/Linux audio has not run on physical
+hardware. A bare `v0.1.0` would imply a completeness that does not exist.

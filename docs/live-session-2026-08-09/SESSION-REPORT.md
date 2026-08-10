@@ -3,7 +3,9 @@
 The first end-to-end use of BuzzTalk as an actual product: a human on real
 hardware (Sony WH-CH720N Bluetooth headset, Mac mini) holding a spoken,
 interruptible, multi-turn conversation with a live Claude agent through a
-real Buzz relay. Every claim below has a raw log in this directory.
+real Buzz relay. The aggregate measurements and observed failures are recorded
+below; raw transcripts and operational logs are intentionally excluded from the
+public repository.
 
 ## What was proven live
 
@@ -13,20 +15,19 @@ real Buzz relay. Every claim below has a raw log in this directory.
   in the speaker's ears. Dozens of complete turns.
 - **Barge-in against a live agent: 8 events, 19.5–43.0 ms** from voice
   detected to playback silent (`--headphones` route, so gating only — the
-  loudspeaker echo path remains unvalidated). The 7–15 ms synthetic number
-  becomes ~20–43 ms over Bluetooth output latency. Cloud assistants sit
-  near 700 ms.
+  loudspeaker echo path was still unvalidated at that point in the day).
+  The 7–15 ms synthetic number becomes ~20–43 ms over Bluetooth output
+  latency. Cloud assistants sit near 700 ms.
 - **End-of-speech → final transcript: 37–235 ms typical** across the
   session (outliers to ~680 ms on long utterances).
 - **Multi-sentence turns**: with 700 ms endpoint patience, two spoken
   sentences with a natural gap arrived as one message.
-- **Agent verbatim recall by voice**: asked "tell me exactly what you heard
-  in the last sixty seconds," the agent reproduced all three prior
-  utterances word-for-word, in order.
-- **The agent debugged its own input channel.** Told the speaker its
-  message "started mid-word with 'iv I should say', so the wake phrase
-  itself is being swallowed" — a correct live diagnosis of front-clipping.
-  Turn-taking QA performed inside the product being QA'd.
+- **Agent recall by voice**: the agent correctly reproduced three prior
+  utterances in order when asked, validating that voice turns remained normal
+  conversation history.
+- **The agent debugged its own input channel.** It correctly identified
+  front-clipping in a live turn, demonstrating that turn-taking QA can happen
+  inside the product being tested.
 
 Session totals: 22 published utterances, 17 empty transcripts correctly
 refused before publish (the empty-content guard earned its keep), 8

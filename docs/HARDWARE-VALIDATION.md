@@ -1,15 +1,16 @@
-# Acoustic validation — run this on a real Mac
+# Controlled acoustic measurement — run this on a real Mac
 
-Every echo-cancellation number in this repository is **synthetic**. They were measured
-against a simulated echo path on a machine whose audio device is a virtual driver, so no
-microphone has ever heard a real loudspeaker here.
+BuzzTalk's **functional** acoustic path is proven: during the 2026-08-09 live session, a
+real microphone heard agent speech from real loudspeakers and three deliberate
+interruptions stopped playback in 7.2, 33.1, and 39.6 ms with no observed false
+self-interruptions. See the
+[session report](live-session-2026-08-09/SESSION-REPORT.md).
 
-Those numbers show the algorithm is sound. They do not show the product works in a room,
-and the gap between the two is the entire feature: barge-in depends on the canceller
-subtracting real speaker output leaking into a real microphone, through real
-non-linearity, real reflections, and real clock drift between two physical devices.
-
-This is the last unproven claim in the project. It takes about two minutes to close.
+The remaining gap is quantitative. The repository's **36.6 dB ERLE** figure comes from a
+simulated echo path, not a controlled physical-room bench run. This harness measures that
+number on real hardware and checks that the canceller's self-reported ERLE is trustworthy
+enough for the barge-in gate. It supplements the live functional evidence; it does not
+erase or repeat it.
 
 ## Run it
 
@@ -31,9 +32,10 @@ PASS/FAIL verdict for four checks:
 | **real-world ERLE ≥ 12 dB** | the threshold `BargeInDetector` gates on; below it, acoustic barge-in is suppressed by design |
 | self-reported ERLE tracks measured | the gate reads the *reported* value — a backend that under-reports disables barge-in while cancelling perfectly. This is exactly how the `webrtc` backend failed here (0.2 dB reported vs 35.1 dB actual) |
 
-## Then confirm by ear
+## Optional functional confirmation
 
-Automation cannot judge the last part:
+The live session already confirmed this behavior, but a new device or room can be checked
+by ear:
 
 ```
 cargo run --release -p buzztalk-pipeline --bin buzztalk-demo -- --seconds 60
@@ -42,27 +44,29 @@ cargo run --release -p buzztalk-pipeline --bin buzztalk-demo -- --seconds 60
 Speakers on, no headphones. Let the agent start talking, then interrupt it out loud. If it
 stops, barge-in works in a room.
 
-## After it passes
+## After a controlled run
 
-1. Replace "synthetic" with the measured numbers in `README.md` and `docs/PHASE-0.md`.
-2. Drop the `-alpha` suffix only once the by-ear test passes too.
-3. Keep the "use headphones" guidance if ERLE lands between 12 and 20 dB — that is working,
+1. Add the measured hardware number alongside the synthetic and live-functional results in
+   `README.md` and `docs/PHASE-0.md`; do not rewrite the historical measurements.
+2. Keep headset-first guidance if ERLE lands between 12 and 20 dB — that is working,
    but not comfortably.
+3. Keep the `-alpha` suffix until packaging and physical Windows/Linux audio coverage match
+   the project's intended support statement.
 
 ## If it fails
 
-Do not weaken the warnings in the release notes. A failure here is useful information: it
-most likely means the room, the speaker volume, or the delay estimate needs work, not that
-the architecture is wrong. Try `--no-aec` on the demo to confirm the rest of the pipeline
-is healthy independent of cancellation.
+Do not replace the pending controlled-ERLE caveat with a passing claim. A failure here is
+useful information: it most likely means the room, speaker volume, or delay estimate needs
+work, not that the live functional record disappeared. Try `--no-aec` on the demo to
+confirm the rest of the pipeline is healthy independent of cancellation.
 
 ## The harness has been validated against a machine that should fail
 
-Run on the development Mac mini, whose only audio device is a Jump Desktop virtual driver,
-`hw-validate` fails all five checks and refuses to produce a usable number:
+In the pre-live development environment, whose only input was a virtual audio driver,
+`hw-validate` failed all five checks and refused to produce a usable number:
 
 ```
-inputs : ["Jump Desktop Microphone", "Jump Desktop Audio"]
+inputs : ["<virtual microphone>", "<virtual audio device>"]
   captured echo   : -120.0 dBFS
   MEASURED ERLE   : -24.3 dB   (backend self-reports Some(0.176))
 
@@ -72,7 +76,7 @@ inputs : ["Jump Desktop Microphone", "Jump Desktop Audio"]
   [FAIL] real-world ERLE >= 12 dB             -24.3 dB
   [FAIL] self-reported ERLE tracks measured   reported 0.2, measured -24.3
 
-SOME CHECKS FAILED — do not drop the -alpha suffix
+SOME CHECKS FAILED — no controlled hardware ERLE claim is available
 ```
 
 The −24.3 dB figure is meaningless: with no acoustic path, the microphone captures digital

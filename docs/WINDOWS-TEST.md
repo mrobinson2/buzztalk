@@ -34,14 +34,15 @@ cpal `DuplexEngine` should just work. No `--vpio` on Windows.
 
 ## Run
 
-The relay, channel, and Coordinator agent are already live from the Mac
-session — same community, so nothing to recreate:
+Supply a relay, channel, and Coordinator agent in the same community. The
+private values used during the macOS validation session are intentionally
+not published here:
 
 ```
 .\target\release\buzztalkd.exe ^
-  --relay wss://mrtek.communities.buzz.xyz ^
-  --channel 9ad66e65-68d8-4126-a41d-d8286e430363 ^
-  --agent-pubkey a8c959c4e9caf6f2cc4fdd1cb3a894a4893f211dea26c0d5e84517fb80a2809f ^
+  --relay wss://<your-community>.communities.buzz.xyz ^
+  --channel <channel-uuid> ^
+  --agent-pubkey <coordinator-pubkey> ^
   --key-file key.txt ^
   --endpoint-silence-ms 700
 ```
@@ -56,8 +57,8 @@ identity at once will both publish. One voice terminal at a time.
 ## What to watch — all first-time-on-Windows unknowns
 
 - **Does capture work?** You should see `[state] UserSpeaking` then
-  `[final] <your words>` in the terminal, and the message appears in The
-  Bridge with Coordinator replying. If you get only `[final]` (empty) or
+  `[final] <your words>` in the terminal, and the message appears in the
+  channel with Coordinator replying. If you get only `[final]` (empty) or
   fragments, cpal isn't delivering clean 48 kHz frames — capture that
   output.
 - **Barge-in.** Talk over the spoken reply. On Windows, route detection

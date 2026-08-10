@@ -173,31 +173,32 @@ The harness paces playback against the wall clock. An earlier unpaced run pushed
 real time and dropped 12.9 M samples — the counter caught it, which is itself evidence the
 backpressure path works, but the underrun figure only means something when pacing is honest.
 
-## Environment caveat — this machine cannot validate acoustics
+## Historical environment caveat — the initial machine could not validate acoustics
 
-The development machine is a **Mac mini accessed remotely via Jump Desktop**. Its default
-audio device is a virtual driver (Phase Five Systems LLC, 8-in/8-out), not physical
-hardware:
+The initial development environment was a remotely accessed Mac whose default audio device
+was a virtual driver, not physical hardware:
 
 ```
-input : ["Jump Desktop Microphone", "Jump Desktop Audio"]
-output: ["Mac mini Speakers", "Jump Desktop Microphone", "Jump Desktop Audio"]
+input : ["<virtual microphone>", "<virtual audio device>"]
+output: ["<physical speakers>", "<virtual microphone>", "<virtual audio device>"]
 detect_output_route() -> unknown
 ```
 
 `unknown` is the correct answer for a virtual device, and it degrades safely: `Unknown` is
 treated as `Speakers`, so the ERLE gate stays armed rather than assuming a headphone free
-pass. But three consequences follow, and none of them are code problems:
+pass. At that stage, three consequences followed; later live-session sections below record
+which gaps were closed:
 
-1. **There is no acoustic loop here.** Every echo-cancellation number in this document is
-   synthetic. The 36.6 dB figure says the algorithm works; it does not say the product works
-   in a room.
-2. **The headphone fast path is untested on real hardware.** It is the demo's safety net, so
-   it needs a physical Mac with headphones plugged in before it can be relied on.
+1. **There was no acoustic loop in this environment.** The 36.6 dB ERLE figure is
+   synthetic. Later live loudspeaker tests proved the functional room path, but a
+   controlled hardware ERLE number remains pending.
+2. **The headphone fast path had not yet run on real hardware.** The later live session
+   validated it repeatedly against agent speech.
 3. **The launch demo cannot be recorded on this machine.** It needs a physical Mac, a real
    microphone, and real speakers or headphones.
 
-Phase 1 should be validated on physical hardware before Phase 5 (barge-in) is trusted.
+That physical-hardware validation was subsequently performed; see the live-session record
+near the end of this document. The controlled ERLE bench measurement remains separate.
 
 ## Decisions taken here
 
@@ -243,7 +244,7 @@ hardware and it is why the acoustic claims still need a physical Mac.
 
 ```
 buzztalk-buzz: connected to ws://localhost:3000
-buzztalk-buzz: authenticated as 1f15f9aedae71c8945198a0df8894151b720fc9361c482ce386c7994be093f52
+buzztalk-buzz: authenticated as <test-identity-pubkey>
 buzztalk-buzz: subscription closed by relay: restricted: not a channel member
 [final]   Well, I don't wish to see it any more, observed Phoebe
 buzztalk-buzz: relay rejected a published event: restricted: not a channel member
@@ -264,9 +265,9 @@ and the message was read back off the relay with `buzz messages get`:
 ```json
 {"content":"Well, I don't wish to see it any more, observed Phoebe",
  "kind":9,
- "pubkey":"55d5355909c6dfa2d953e8bb937ed3f2310a7a70bb145e87e8b1461f7dfd280b",
- "tags":[["h","9fceb0cd-974d-4ed6-8621-7b4350682d8f"],
-         ["p","70541d2c65d9f1e97c308ec9867417f9a031cc5d8e9dab3ec12692d98a0734d3"]]}
+ "pubkey":"<message-author-pubkey>",
+ "tags":[["h","<channel-id>"],
+         ["p","<agent-pubkey>"]]}
 ```
 
 Audio in, signed `kind:9` event out, correct `h` and `p` tags, persisted in a real
@@ -276,7 +277,7 @@ relay and retrievable by Buzz's own tooling. Voice-to-Buzz is verified end to en
 
 The full conversation loop was closed against a live agent for the first time.
 Setup: the same local `buzz-relay` (0.2.1), a fresh private channel
-(`ef319be4-4b42-44b2-a7b5-d379f03149b3`), and upstream's `buzz-acp` harness running
+(identifier omitted), and upstream's `buzz-acp` harness running
 **Claude (via `claude-agent-acp` 0.66.0)** as a channel member, `--respond-to anyone`,
 with a voice-register system prompt (one or two short sentences, no markdown).
 
@@ -295,7 +296,9 @@ with a voice-register system prompt (one or two short sentences, no markdown).
 Speech in, kind:9 published with `h`/`p` tags, a real LLM agent replied over the relay,
 the reply passed eligibility, was attributed to the turn, and was synthesized and played
 (`AgentSpeaking` → `Listening`). Both directions read back with `buzz messages get`.
-Full log: `docs/closed-loop-run-2026-08-09.log`.
+The privacy-safe aggregate record is in
+`docs/live-session-2026-08-09/SESSION-REPORT.md`; raw transcripts and operational logs
+are intentionally not published.
 
 One integration wrinkle worth recording: `claude-agent-acp` runs Claude Code in
 `dontAsk` permission mode, which silently rejects the `buzz messages send` Bash call
@@ -311,13 +314,13 @@ Bluetooth headset, real microphone, live spoken conversation. **Eight
 barge-ins against the live agent's reply, 19.5–43.0 ms from voice detected
 to playback silent.** Multi-turn conversation, verbatim recall by voice,
 and the agent live-diagnosing its own input clipping. Full report, raw
-logs, bug list (including the open Bluetooth sample-rate renegotiation
-issue), and tuning changes: [`docs/live-session-2026-08-09/SESSION-REPORT.md`](live-session-2026-08-09/SESSION-REPORT.md).
+logs, the Bluetooth issue discovered that morning, and tuning changes:
+[`docs/live-session-2026-08-09/SESSION-REPORT.md`](live-session-2026-08-09/SESSION-REPORT.md).
 
 Same day, afternoon: **loudspeaker barge-in proven** — three deliberate
 interrupts through a live open-air echo path (agent on real speakers, AEC
 active) at 7.2 / 33.1 / 39.6 ms, plus a self-healing audio engine that
-rebuilds on device changes. Remaining: the quantitative acoustic ERLE
-bench number, and the VoiceProcessingIO engine path for full-duplex on
-Bluetooth. Full record:
+rebuilds on device changes. The quantitative acoustic ERLE bench number
+remained open. The VoiceProcessingIO full-duplex Bluetooth path was built
+and validated later that same day, as recorded in the session report:
 [`docs/live-session-2026-08-09/SESSION-REPORT.md`](live-session-2026-08-09/SESSION-REPORT.md).
