@@ -75,6 +75,77 @@ fn final_clears_dead_capture(text: &str) -> bool {
     text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
 }
 
+// ── Micro-utterance fragment filter ─────────────────────────────────────────
+//
+// Today every non-empty final becomes a published channel message. The same
+// attenuated-capture signature `final_clears_dead_capture` exists for --
+// a single stray phoneme squeaking through as a one-letter final -- also
+// produces one-word garbage chat messages when it happens to survive as
+// (say) two letters instead of one and so *does* clear the dead-capture
+// watchdog. This filter is judgment about what to *publish*, independent of
+// that judgment about what counts as a *word* for the watchdog: a filtered
+// fragment must still count as wordless there (see `handle_stt_result`) --
+// dropping it is evidence of degraded capture, not proof capture is fine.
+
+/// Meaningful short words: never dropped by [`is_micro_utterance_fragment`]
+/// regardless of duration, even though they're short enough to trip the
+/// length rule on their own. Add a word here (lowercase) to exempt it.
+const FRAGMENT_ALLOWLIST: &[&str] = &[
+    "yes", "no", "yeah", "yep", "nope", "ok", "okay", "sure", "stop", "wait", "go", "hey", "hi",
+    "bye", "why", "how", "who", "one", "two", "six", "ten",
+];
+
+/// Longest speech duration (session/metrics speech-start -> endpoint
+/// measurement -- see [`SessionMachine::speaking_elapsed`], not a second
+/// clock) [`is_micro_utterance_fragment`] considers. A single junk token
+/// past this is trusted as a real (if short) utterance.
+const FRAGMENT_MAX_SPEECH_DURATION: Duration = Duration::from_millis(1000);
+
+/// Longest normalized-token length, in alphanumeric characters,
+/// [`is_micro_utterance_fragment`] considers a fragment. Real short words
+/// ("Cowboys", "status") are always longer than this and always pass.
+const FRAGMENT_MAX_ALNUM_CHARS: usize = 3;
+
+/// If `text` -- once punctuation is stripped and it's trimmed -- is exactly
+/// one non-empty whitespace-separated word, that word's lowercased,
+/// alphanumeric-only form (`"Well,"` -> `"well"`, `"don't"` -> `"dont"`).
+/// `None` for anything that splits into zero or more-than-one words --
+/// multi-word utterances are never fragments, however short each word is.
+fn normalize_single_token(text: &str) -> Option<String> {
+    let mut words = text.split_whitespace();
+    let only = words.next()?;
+    if words.next().is_some() {
+        return None;
+    }
+    Some(
+        only.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect(),
+    )
+}
+
+/// Whether a just-finalized transcript is a micro-utterance fragment: noise
+/// short enough, and nonsense enough, that publishing it as a chat message
+/// would be garbage rather than a real (if terse) reply. All must hold:
+///
+/// 1. `speech_duration` is at most [`FRAGMENT_MAX_SPEECH_DURATION`].
+/// 2. `text` normalizes to a single token ([`normalize_single_token`]).
+/// 3. That token has at most [`FRAGMENT_MAX_ALNUM_CHARS`] characters.
+/// 4. The token is not in [`FRAGMENT_ALLOWLIST`].
+fn is_micro_utterance_fragment(text: &str, speech_duration: Duration) -> bool {
+    if speech_duration > FRAGMENT_MAX_SPEECH_DURATION {
+        return false;
+    }
+    let Some(token) = normalize_single_token(text) else {
+        return false;
+    };
+    if token.chars().count() > FRAGMENT_MAX_ALNUM_CHARS {
+        return false;
+    }
+    !FRAGMENT_ALLOWLIST.contains(&token.as_str())
+}
+
 /// The recipe for reopening the audio engine on the current default
 /// devices, kept by the orchestrator so it can rebuild live when a device
 /// disappears or renegotiates its format. `None` in simulate mode.
@@ -178,6 +249,12 @@ pub struct PipelineConfig {
     /// capture with WAV-sourced frames regardless of which engine renders
     /// playback, and `DuplexEngine` is the better-exercised path for that.
     pub use_voice_processing: bool,
+    /// Disable the micro-utterance fragment filter (see
+    /// [`is_micro_utterance_fragment`]): every non-empty final is submitted
+    /// and published, even a single-letter noise fragment. Defaults to
+    /// `false` -- the filter runs by default; `buzztalkd`'s
+    /// `--no-fragment-filter` sets this `true`.
+    pub no_fragment_filter: bool,
 }
 
 impl Default for PipelineConfig {
@@ -190,6 +267,7 @@ impl Default for PipelineConfig {
             no_aec: false,
             endpoint_silence_ms: None,
             use_voice_processing: false,
+            no_fragment_filter: false,
         }
     }
 }
@@ -292,6 +370,17 @@ pub enum PipelineEvent {
     Partial(String),
     /// The finalized transcript for the user's utterance.
     FinalTranscript(String),
+    /// A finalized transcript was judged a micro-utterance fragment (see
+    /// [`is_micro_utterance_fragment`]) and dropped: never submitted to the
+    /// agent, never published. Distinct from [`Self::Dropped`], which is
+    /// about backpressure, not content.
+    FragmentFiltered {
+        /// The dropped text, exactly as STT finalized it.
+        text: String,
+        /// The utterance's speech duration, for the same log line a human
+        /// reads this event to reconstruct.
+        duration_ms: u64,
+    },
     /// A chunk of the agent's reply text.
     AgentText(String),
     /// A pre-formatted latency summary for the turn that just ended.
@@ -356,6 +445,7 @@ impl ConversationPipeline {
             no_aec,
             endpoint_silence_ms,
             use_voice_processing,
+            no_fragment_filter,
         } = config;
 
         // Simulate mode replaces capture with WAV-sourced frames regardless
@@ -435,6 +525,7 @@ impl ConversationPipeline {
             rebuild_failures: 0,
             stall_rebuild_attempted: false,
             consecutive_empty_finals: 0,
+            no_fragment_filter,
             no_aec,
             aec,
             endpoint,
@@ -568,6 +659,9 @@ struct Orchestrator {
     /// dead-capture signal (see [`DEAD_CAPTURE_EMPTY_FINALS`] and
     /// `handle_stt_result`). Reset by any word-bearing final or a rebuild.
     consecutive_empty_finals: u32,
+    /// `--no-fragment-filter`: disables [`is_micro_utterance_fragment`]
+    /// dropping. See [`PipelineConfig::no_fragment_filter`].
+    no_fragment_filter: bool,
     /// Recreate the canceller to match a rebuilt engine (`--no-aec` state).
     no_aec: bool,
     aec: Box<dyn EchoCanceller>,
@@ -1066,6 +1160,33 @@ impl Orchestrator {
                 if self.session.is_current(turn) {
                     self.metrics.mark_final_transcript();
                 }
+
+                // Micro-utterance fragment filter: today every non-empty
+                // final becomes a published channel message. A short,
+                // nonsense, single-token final closing a very short
+                // utterance is the same degraded-capture signature
+                // `final_clears_dead_capture` exists for, just not always
+                // short enough to trip *that* check too -- drop it before
+                // it ever reaches the session machine's Submitting path
+                // (`Input::FinalTranscriptRejected`, not
+                // `Input::FinalTranscript`: no submission to the agent, no
+                // publish), and go straight to the wordless branch below
+                // regardless of what `final_clears_dead_capture` alone
+                // would have said about this same text -- a dropped
+                // fragment is evidence of degraded capture, not proof
+                // capture is fine, so filtering it must never let it
+                // silently clear the dead-capture watchdog.
+                let speech_duration = self.session.speaking_elapsed();
+                if !self.no_fragment_filter && is_micro_utterance_fragment(&text, speech_duration) {
+                    self.mark_wordless_final();
+                    let _ = self.events_tx.send(PipelineEvent::FragmentFiltered {
+                        text: text.clone(),
+                        duration_ms: speech_duration.as_millis() as u64,
+                    });
+                    self.dispatch(Input::FinalTranscriptRejected { turn });
+                    return;
+                }
+
                 // Dead-capture watchdog. A final with (nearly) no
                 // alphanumeric content that nonetheless closed a real
                 // speech turn means the endpointer heard energy but the
@@ -1084,25 +1205,36 @@ impl Orchestrator {
                 if final_clears_dead_capture(&text) {
                     self.consecutive_empty_finals = 0;
                 } else {
-                    self.consecutive_empty_finals += 1;
-                    if self.consecutive_empty_finals >= DEAD_CAPTURE_EMPTY_FINALS
-                        && self.simulate_frames.is_none()
-                        && self.engine_factory.is_some()
-                    {
-                        self.rebuild_engine(
-                            format!(
-                                "capture producing no words for {} turns (stream gone bad)",
-                                self.consecutive_empty_finals
-                            ),
-                            None,
-                        );
-                    }
+                    self.mark_wordless_final();
                 }
                 let _ = self
                     .events_tx
                     .send(PipelineEvent::FinalTranscript(text.clone()));
                 self.dispatch(Input::FinalTranscript { turn, text });
             }
+        }
+    }
+
+    /// Increment the dead-capture watchdog's consecutive-wordless-turn
+    /// counter and, once it reaches [`DEAD_CAPTURE_EMPTY_FINALS`], rebuild
+    /// the engine. Shared by the "STT delivered a final with no real
+    /// words" branch of `handle_stt_result` and the micro-utterance
+    /// fragment filter's drop path, which counts as wordless by
+    /// definition regardless of what `final_clears_dead_capture` alone
+    /// would have said about the same text.
+    fn mark_wordless_final(&mut self) {
+        self.consecutive_empty_finals += 1;
+        if self.consecutive_empty_finals >= DEAD_CAPTURE_EMPTY_FINALS
+            && self.simulate_frames.is_none()
+            && self.engine_factory.is_some()
+        {
+            self.rebuild_engine(
+                format!(
+                    "capture producing no words for {} turns (stream gone bad)",
+                    self.consecutive_empty_finals
+                ),
+                None,
+            );
         }
     }
 
@@ -1432,6 +1564,90 @@ mod tests {
         }
     }
 
+    // ── Micro-utterance fragment filter: pure classification ────────────
+
+    #[test]
+    fn single_word_normalizes_to_its_lowercased_alphanumeric_form() {
+        assert_eq!(normalize_single_token("H"), Some("h".to_string()));
+        assert_eq!(
+            normalize_single_token("  Well.  "),
+            Some("well".to_string())
+        );
+        assert_eq!(
+            normalize_single_token("Cowboys"),
+            Some("cowboys".to_string())
+        );
+        assert_eq!(normalize_single_token("don't"), Some("dont".to_string()));
+    }
+
+    #[test]
+    fn multiple_words_never_normalize_to_a_single_token() {
+        for text in ["hi there", "I don't know", "  a  b  "] {
+            assert_eq!(
+                normalize_single_token(text),
+                None,
+                "{text:?} must not normalize to a single token"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_or_whitespace_only_text_has_no_single_token() {
+        assert_eq!(normalize_single_token(""), None);
+        assert_eq!(normalize_single_token("   "), None);
+    }
+
+    #[test]
+    fn short_single_char_fragment_under_a_second_is_a_fragment() {
+        assert!(is_micro_utterance_fragment("H", Duration::from_millis(800)));
+    }
+
+    #[test]
+    fn allowlisted_short_words_are_never_fragments() {
+        for word in ["yes", "no", "ok", "okay", "Yes", "OK"] {
+            assert!(
+                !is_micro_utterance_fragment(word, Duration::from_millis(800)),
+                "{word:?} is allowlisted and must never be filtered"
+            );
+        }
+    }
+
+    #[test]
+    fn a_four_character_word_passes_on_length_alone() {
+        // "cows": 4 alphanumeric characters, not allowlisted -- long enough
+        // to pass regardless of duration or allowlist membership.
+        assert!(!is_micro_utterance_fragment(
+            "cows",
+            Duration::from_millis(800)
+        ));
+    }
+
+    #[test]
+    fn multi_word_utterances_are_never_fragments_however_short() {
+        assert!(!is_micro_utterance_fragment(
+            "hi there",
+            Duration::from_millis(500)
+        ));
+    }
+
+    #[test]
+    fn a_junk_token_past_one_second_is_not_a_fragment() {
+        // The rule only bites at <=1000ms; a longer utterance is trusted
+        // even if it's a single short, non-allowlisted token.
+        assert!(!is_micro_utterance_fragment(
+            "zzz",
+            Duration::from_millis(1001)
+        ));
+    }
+
+    #[test]
+    fn exactly_one_second_still_counts_as_at_most_one_second() {
+        assert!(is_micro_utterance_fragment(
+            "H",
+            Duration::from_millis(1000)
+        ));
+    }
+
     #[test]
     #[ignore = "requires the real Parakeet + Pocket TTS models on disk; segfaults today, see module docs"]
     fn stt_then_tts_construct_together() {
@@ -1609,6 +1825,7 @@ mod tests {
             rebuild_failures: 0,
             stall_rebuild_attempted: false,
             consecutive_empty_finals: 0,
+            no_fragment_filter: false,
             no_aec: true,
             aec: Box::new(NullCanceller),
             endpoint: EndpointDetector::default(),
@@ -2020,5 +2237,163 @@ mod tests {
             lost_events, 1,
             "the microphone must be reported lost exactly once, not spammed"
         );
+    }
+
+    // ── Micro-utterance fragment filter: orchestrator wiring ────────────
+
+    /// Drive one PTT-bounded utterance with a controlled speech duration
+    /// (a single large `Tick` while `UserSpeaking`, exactly like
+    /// `speaking_elapsed`'s own doc describes -- frozen the instant
+    /// `PushToTalkReleased` moves the state past it), then wait for the
+    /// (fake-backed) STT worker to answer. Returns once the turn either
+    /// reaches `AwaitingAgent` (submitted) or falls back to `Listening`
+    /// (dropped), whichever happens first.
+    fn drive_one_utterance(
+        orch: &mut Orchestrator,
+        handle: &FakeAudioEngineHandle,
+        speech_duration: Duration,
+    ) -> TurnId {
+        orch.dispatch(Input::PushToTalkPressed);
+        let turn = orch
+            .session
+            .current_turn()
+            .expect("ptt press starts a turn");
+        orch.dispatch(Input::Tick(speech_duration));
+        orch.dispatch(Input::PushToTalkReleased);
+        let settled = drive_until(orch, handle, 200, |o| {
+            matches!(
+                o.session.state(),
+                SessionState::AwaitingAgent | SessionState::Listening
+            )
+        });
+        assert!(
+            settled,
+            "utterance must settle to AwaitingAgent or Listening"
+        );
+        turn
+    }
+
+    #[test]
+    fn a_dropped_fragment_is_never_submitted_and_returns_to_listening() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "H" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+
+        drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(800));
+
+        assert_eq!(orch.session.state(), SessionState::Listening);
+        assert_eq!(
+            agent_handle.submits(),
+            vec![],
+            "a dropped fragment must never reach the agent backend (so it can never publish)"
+        );
+        let events = drain_events(&events_rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::FragmentFiltered { text, .. } if text == "H")),
+            "a FragmentFiltered event must report the dropped text: {events:?}"
+        );
+    }
+
+    #[test]
+    fn a_dropped_fragment_still_advances_the_dead_capture_wordless_counter() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "H" });
+        let (agent, _agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+        assert_eq!(orch.consecutive_empty_finals, 0);
+
+        drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(800));
+
+        assert_eq!(
+            orch.consecutive_empty_finals, 1,
+            "a dropped fragment must count as wordless, exactly like an empty final"
+        );
+    }
+
+    #[test]
+    fn allowlisted_short_words_are_still_published() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "ok" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+
+        let turn = drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(800));
+
+        assert_eq!(orch.session.state(), SessionState::AwaitingAgent);
+        assert_eq!(agent_handle.submits(), vec![(turn, "ok".to_string())]);
+    }
+
+    #[test]
+    fn a_longer_word_is_published_on_length_alone() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "cows" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+
+        let turn = drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(800));
+
+        assert_eq!(orch.session.state(), SessionState::AwaitingAgent);
+        assert_eq!(agent_handle.submits(), vec![(turn, "cows".to_string())]);
+    }
+
+    #[test]
+    fn a_multi_word_short_utterance_is_published() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "hi there" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+
+        let turn = drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(500));
+
+        assert_eq!(orch.session.state(), SessionState::AwaitingAgent);
+        assert_eq!(agent_handle.submits(), vec![(turn, "hi there".to_string())]);
+    }
+
+    #[test]
+    fn a_junk_token_past_one_second_is_published() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "zzz" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.dispatch(Input::SessionStart);
+
+        let turn = drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(1200));
+
+        assert_eq!(orch.session.state(), SessionState::AwaitingAgent);
+        assert_eq!(agent_handle.submits(), vec![(turn, "zzz".to_string())]);
+    }
+
+    #[test]
+    fn no_fragment_filter_disables_the_drop() {
+        let (engine, engine_handle) = FakeAudioEngine::new();
+        let stt = SttWorker::spawn_with(EchoRecognizer { text: "H" });
+        let (agent, agent_handle) = ScriptedAgent::new();
+        let (mut orch, _events_rx) =
+            build_orchestrator(Box::new(engine), Some(stt), None, Box::new(agent));
+        orch.no_fragment_filter = true;
+        orch.dispatch(Input::SessionStart);
+
+        let turn = drive_one_utterance(&mut orch, &engine_handle, Duration::from_millis(800));
+
+        assert_eq!(
+            orch.session.state(),
+            SessionState::AwaitingAgent,
+            "--no-fragment-filter must disable dropping"
+        );
+        assert_eq!(agent_handle.submits(), vec![(turn, "H".to_string())]);
     }
 }

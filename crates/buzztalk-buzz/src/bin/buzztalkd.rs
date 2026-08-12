@@ -10,7 +10,7 @@
 //!           --agent-pubkey <hex-or-npub> [--agent-pubkey <hex-or-npub> ...]
 //!           [--key-env VAR | --key-file PATH]
 //!           [--headphones] [--no-aec] [--simulate [PATH]] [--seconds N]
-//!           [--quiet-period-ms N]
+//!           [--quiet-period-ms N] [--no-fragment-filter]
 //! buzztalkd --download-models
 //! buzztalkd --model-status
 //! ```
@@ -23,6 +23,16 @@
 //! ("every failure degrades to something usable"), a missing STT or TTS
 //! model does not stop `buzztalkd` from starting -- it prints the
 //! pipeline's capability report right after startup, same as the demo.
+//!
+//! `--no-fragment-filter` disables the micro-utterance fragment filter
+//! (`buzztalk_pipeline::PipelineConfig::no_fragment_filter`), which is on
+//! by default: a very short (<=1000ms), single-token, non-allowlisted
+//! final transcript (a stray "H" or "U" squeaking through degraded
+//! capture, not a real short reply like "yes" or "stop") is dropped --
+//! logged as `[filter]  dropped micro-utterance fragment (...)`, returned
+//! to `Listening` -- instead of published as a garbage one-word chat
+//! message. Pass this flag to publish every non-empty final again, exactly
+//! like before the filter existed.
 //!
 //! `--download-models` and `--model-status` also mirror the demo exactly
 //! (both delegate to `buzztalk-models`): checked before `--relay`/
@@ -55,6 +65,7 @@ struct Args {
     vpio: bool,
     simulate: Option<PathBuf>,
     seconds: u64,
+    no_fragment_filter: bool,
 }
 
 impl Args {
@@ -73,6 +84,7 @@ impl Args {
         let mut vpio = false;
         let mut simulate = None;
         let mut seconds = 0u64;
+        let mut no_fragment_filter = false;
 
         let mut it = args.peekable();
 
@@ -118,6 +130,7 @@ impl Args {
                 "--headphones" => headphones = true,
                 "--no-aec" => no_aec = true,
                 "--vpio" => vpio = true,
+                "--no-fragment-filter" => no_fragment_filter = true,
                 "--simulate" => {
                     let path = match it.peek() {
                         Some(p) if !p.starts_with("--") => PathBuf::from(it.next().unwrap()),
@@ -159,6 +172,7 @@ impl Args {
             vpio,
             simulate,
             seconds,
+            no_fragment_filter,
         })
     }
 }
@@ -176,7 +190,7 @@ fn print_usage() {
          \x20         --agent-pubkey <hex-or-npub> [--agent-pubkey ...] \\\n\
          \x20         [--key-env VAR | --key-file PATH] \\\n\
          \x20         [--headphones] [--no-aec] [--vpio] [--simulate [PATH]] [--seconds N] \\\n\
-         \x20         [--quiet-period-ms N]\n\
+         \x20         [--quiet-period-ms N] [--no-fragment-filter]\n\
          \x20      buzztalkd --download-models\n\
          \x20      buzztalkd --model-status\n\n\
          The signing key defaults to the BUZZTALK_NOSTR_SECRET environment variable\n\
@@ -275,6 +289,7 @@ fn main() {
         no_aec: args.no_aec,
         endpoint_silence_ms: args.endpoint_silence_ms,
         use_voice_processing: args.vpio,
+        no_fragment_filter: args.no_fragment_filter,
     };
 
     let pipeline = match ConversationPipeline::start(pipeline_config) {
@@ -337,6 +352,11 @@ fn main() {
                 }
             }
             Some(PipelineEvent::FinalTranscript(text)) => println!("[final]   {text}"),
+            Some(PipelineEvent::FragmentFiltered { text, duration_ms }) => {
+                println!(
+                    "[filter]  dropped micro-utterance fragment (\"{text}\", {duration_ms} ms)"
+                )
+            }
             Some(PipelineEvent::AgentText(text)) => println!("[agent]   {text}"),
             Some(PipelineEvent::TurnMetrics(summary)) => println!("[metrics] {summary}"),
             Some(PipelineEvent::Dropped { what, total }) => {

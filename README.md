@@ -213,6 +213,10 @@ the portable two-stream engine (but a Bluetooth headset's mic may get
 starved — see the session report). `--agent-pubkey` both p-tags outgoing
 messages and selects which replies are spoken. Drop `--headphones` for
 loudspeakers with live AEC. A local relay can use `ws://localhost:3000`.
+A short, nonsense, single-word final (a stray "H" squeaking through
+degraded capture) is dropped rather than published as a garbage chat
+message; pass `--no-fragment-filter` to publish every non-empty final
+again, exactly like before that filter existed.
 
 **Want the multi-agent "voice-commanded crew" demo** (speak, and a team of
 agents divides the work)? That setup — roles, mention routing, one narrator

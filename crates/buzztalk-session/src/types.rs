@@ -159,6 +159,17 @@ pub enum Input {
         /// The finalized text.
         text: String,
     },
+    /// The caller judged the just-finalized transcript for `turn` not worth
+    /// acting on (e.g. `buzztalk-pipeline`'s micro-utterance fragment
+    /// filter) and is declining to submit it. Returns the turn to
+    /// [`SessionState::Listening`] immediately, exactly like the
+    /// `FINALIZE_TIMEOUT` fallback -- distinct from [`Input::SubmitFailed`],
+    /// which means a real backend rejected an utterance that *was* sent and
+    /// is worth surfacing for retry; this one was never sent at all.
+    FinalTranscriptRejected {
+        /// The turn whose final transcript is being declined.
+        turn: TurnId,
+    },
     /// The submitted utterance was accepted by the agent backend.
     SubmitSucceeded {
         /// The turn that was submitted.

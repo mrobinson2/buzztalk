@@ -114,6 +114,20 @@ impl SessionMachine {
         self.last_submit_error.as_deref()
     }
 
+    /// How long the just-completed (or in-progress) utterance spent in
+    /// [`SessionState::UserSpeaking`]: accumulated from
+    /// [`Input::EndpointEvent`]`(SpeechStart)` by every [`Input::Tick`]
+    /// while `UserSpeaking`, and frozen the instant the state leaves it
+    /// (`SpeechEnd`, `MAX_UTTERANCE` forcing an endpoint, or a barge-in
+    /// seizing the turn) -- so a caller processing the resulting final
+    /// transcript in [`SessionState::Finalizing`] reads this as "speech
+    /// start to endpoint" for the turn that final belongs to, not a
+    /// live-still-accumulating value. Reset to zero the next time a turn
+    /// begins.
+    pub fn speaking_elapsed(&self) -> Duration {
+        self.speaking_elapsed
+    }
+
     /// Feed one frame of audio into the pre-roll buffer.
     ///
     /// A no-op while [`SessionState::Idle`] -- the buffer only fills while a
@@ -144,6 +158,7 @@ impl SessionMachine {
             Input::BargeInConfirmed => self.on_barge_in_confirmed(),
             Input::PartialTranscript { turn, text } => self.on_partial_transcript(turn, text),
             Input::FinalTranscript { turn, text } => self.on_final_transcript(turn, text),
+            Input::FinalTranscriptRejected { turn } => self.on_final_transcript_rejected(turn),
             Input::SubmitSucceeded { turn } => self.on_submit_succeeded(turn),
             Input::SubmitFailed { turn, error } => self.on_submit_failed(turn, error),
             Input::AgentTextArrived { turn, text } => self.on_agent_text_arrived(turn, text),
@@ -331,6 +346,24 @@ impl SessionMachine {
             // would guard against.)
             _ => vec![],
         }
+    }
+
+    /// A final transcript the caller declined to submit (e.g. a filtered
+    /// nonsense fragment): drop the turn and give the mic back, exactly
+    /// like the `FINALIZE_TIMEOUT` fallback in [`Self::on_tick`] -- the
+    /// only difference is what triggered it, a caller decision instead of a
+    /// clock. Only `Finalizing` is ever waiting on a final transcript to
+    /// accept or reject, mirroring [`Self::on_final_transcript`]'s own
+    /// state check.
+    fn on_final_transcript_rejected(&mut self, turn: TurnId) -> Vec<Output> {
+        if !self.is_current(turn) || self.state != SessionState::Finalizing {
+            return vec![];
+        }
+        self.finalizing_elapsed = Duration::ZERO;
+        self.current_turn = None;
+        self.state = SessionState::Listening;
+        self.listening_elapsed = Duration::ZERO;
+        vec![]
     }
 
     /// Shared confirmation path for a genuine (non-spurious) barge-in: the

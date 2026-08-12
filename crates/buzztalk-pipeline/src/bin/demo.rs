@@ -192,6 +192,11 @@ fn main() {
                 }
             }
             Some(PipelineEvent::FinalTranscript(text)) => println!("[final]   {text}"),
+            Some(PipelineEvent::FragmentFiltered { text, duration_ms }) => {
+                println!(
+                    "[filter]  dropped micro-utterance fragment (\"{text}\", {duration_ms} ms)"
+                )
+            }
             Some(PipelineEvent::AgentText(text)) => println!("[agent]   {text}"),
             Some(PipelineEvent::TurnMetrics(summary)) => println!("[metrics] {summary}"),
             Some(PipelineEvent::Dropped { what, total }) => {
